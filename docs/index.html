@@ -151,6 +151,18 @@ td.hex,td.num,.mono{font-family:var(--mono);font-size:.82rem}
 .mapscroll canvas{display:block;cursor:crosshair}
 .mapscroll.over canvas{cursor:zoom-in}
 .mlegend.maplegend{margin-bottom:10px}
+.mlegend .fragrow::before{width:3px;background:var(--frag)}
+.viewseg{margin:0 0 0 auto;gap:0}
+.viewseg button+button{margin-left:-1px}
+.viewseg:not([hidden])+input{margin-left:0}
+/* Detailed view: the block map as in the paper's figure, with the detail in a panel beside it */
+.mapwrap.side{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:24px;align-items:start}
+.mapwrap.side .detail{position:sticky;top:12px;width:auto;border:0;box-shadow:none;padding:0;pointer-events:auto;z-index:auto}
+.mapwrap.side .detail .big{font-size:4.5rem;padding:10px 0 16px}
+.mapwrap.side .detail dd.plain{font-family:var(--mono);font-size:.8rem}
+.mapwrap.side .detail .split span{font-family:var(--mono)}
+.mapwrap.side .detail .split small{opacity:.7;margin-left:4px}
+@media (max-width:760px){.mapwrap.side{grid-template-columns:minmax(0,1fr)}.mapwrap.side .detail{position:static}}
 .detail{position:fixed;z-index:30;width:260px;background:var(--bg);border:1px solid var(--fg);box-shadow:0 8px 28px rgba(17,17,17,.16);padding:12px 14px;font-size:.86rem;display:grid;gap:8px;pointer-events:none}
 .detail.pinned{pointer-events:auto}
 .detail .big{font-size:3.4rem;line-height:1.1;text-align:center;padding:4px 0 10px;border-bottom:1px solid var(--line);overflow:hidden}
@@ -280,12 +292,15 @@ footer a:hover{color:var(--fg)}
       <div class="mapnav">
         <div class="scriptchips" id="scriptchips" role="group" aria-label="Scripts"></div>
       </div>
-      <div class="mlegend maplegend"><span class="whole">one whole token</span><span class="none">split into bytes</span><span class="empty" title="Unassigned, or outside this block">no character</span><span class="tip" id="maptip"></span>
+      <div class="mlegend maplegend"><span class="whole" id="lgwhole">one whole token</span><span class="none" id="lgsplit">split into bytes</span><span class="fragrow" id="lgfrag" hidden>row prefix is a fragment token</span><span class="empty" id="lgempty" title="Unassigned, or outside this block">no character</span><span class="tip" id="maptip"></span>
+        <div class="pills viewseg" id="viewseg" role="radiogroup" aria-label="View" hidden><button role="radio" data-v="compact" aria-checked="true" title="The 64 columns fitted to the page">Compact</button><button role="radio" data-v="detailed" aria-checked="false" title="Larger characters, a side panel, and a red mark on rows whose byte prefix is itself a token">Detailed</button></div>
         <input type="search" id="blocksearch" list="blocklist" placeholder="Find any Unicode block…" aria-label="Jump to a Unicode block">
         <datalist id="blocklist"></datalist>
       </div>
-      <div class="mapscroll over" id="mapscroll"><canvas id="map"></canvas></div>
-      <div class="detail" id="detail" hidden></div>
+      <div class="mapwrap" id="mapwrap">
+        <div class="mapscroll over" id="mapscroll"><canvas id="map"></canvas></div>
+        <div class="detail" id="detail" hidden></div>
+      </div>
     </section>
   </div>
 
@@ -672,6 +687,22 @@ const pct=(w,a)=>{if(!a)return '–';const v=100*w/a;return (v>0&&v<1?v.toFixed(
   $('#blocksel').innerHTML='<option value="overview">All of Unicode</option>'+ByteMap.FEATURED.map(opt).join('')+ByteMap.ALL.map(opt).join('');
 })();
 let mapInfo=null, pinned=null, hlBlock=null, lastCp=null;
+// Two views of a block: "compact" (default) and "detailed" (the layout of the paper's figure: 22 px cells,
+// a side panel, red marks on rows whose prefix is a fragment token). Kept in the URL and per browser.
+let mapView='compact'; try{if(localStorage.getItem('bpl-view')==='detailed')mapView='detailed';}catch(e){}
+const isSide=()=>mapView==='detailed'&&!!mapInfo&&!mapInfo.overview;
+function utf16(cp){const s=String.fromCodePoint(cp);return Array.from({length:s.length},(_,i)=>s.charCodeAt(i).toString(16).toUpperCase().padStart(4,'0')).join(' ');}
+const fragCache={};
+// rows (code point >> 6) whose shared UTF-8 prefix is itself a fragment token; null until it can be known
+function fragFor(enc){
+  if(fragCache[enc])return fragCache[enc];
+  const n=0x110000>>6;
+  if(WHOLE&&WHOLE.frag&&WHOLE.frag[enc]){const a=new Uint8Array(n), r=WHOLE.frag[enc];for(let i=0;i<r.length;i+=2)a.fill(1,r[i],r[i]+r[i+1]);return fragCache[enc]=a;}
+  const v=ready[enc]; if(!v)return null;
+  const a=new Uint8Array(n);
+  for(let g=2;g<n;g++){const cp=g<<6;if(cp>=0xD800&&cp<=0xDFFF)continue;if(ByteMap.isFragmentPrefix(v,rowPrefix(cp)))a[g]=1;}
+  return fragCache[enc]=a;
+}
 const LABELW=64, GAP=1;
 function cssVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
 function cellSize(block){const w=$('#mapscroll').clientWidth-(block?16:0);return Math.max(13,Math.min(22,Math.floor((w-LABELW-2)/64)-GAP));}
@@ -763,13 +794,14 @@ function overviewCell(ev){
 /* The detail card follows the pointer; a click on a character pins it. */
 function placeCard(ev){
   const d=$('#detail'); d.hidden=false;
+  if(isSide()){d.style.left=d.style.top='';return;} // a panel beside the map, not a floating card
   const w=d.offsetWidth, h=d.offsetHeight; let x, y;
   if(ev){x=ev.clientX+18; y=ev.clientY+18; if(x+w>innerWidth-8)x=ev.clientX-w-18; if(y+h>innerHeight-8)y=innerHeight-h-8;}
   else{const r=$('#mapscroll').getBoundingClientRect(); x=r.right-w-24; y=r.top+16;}
   d.style.left=Math.max(8,x)+'px'; d.style.top=Math.max(8,y)+'px';
 }
-function hideCard(){if(pinned===null)$('#detail').hidden=true;}
-function unpin(){pinned=null;$('#detail').classList.remove('pinned');$('#detail').hidden=true;if(V)writeHash();}
+function hideCard(){if(pinned===null&&!isSide())$('#detail').hidden=true;}
+function unpin(){pinned=null;$('#detail').classList.remove('pinned');$('#detail').hidden=true;drawMap();if(isSide()&&lastCp!==null)showDetail(lastCp);writeHash();}
 function showGroup(g){
   const O=mapInfo.O, lo=g<<6, hi=lo+63, blk=ByteMap.blockOf(lo);
   const sample=[];for(let cp=lo;cp<=hi&&sample.length<8;cp++){const ch=String.fromCodePoint(cp);if(!ByteMap.NONCHAR.test(ch)&&!KIND(ch))sample.push((MARK.test(ch)?'◌':'')+ch);}
@@ -796,6 +828,10 @@ const SHORTB={ascii:'ASCII',latin:'Latin',greek:'Greek',cyrillic:'Cyrillic',hebr
 function updateMapNav(){
   const id=$('#blocksel').value, blk=BLOCK[id], ov=id==='overview';
   $('#mapscroll').className='mapscroll '+(ov?'over':'block');
+  const side=!ov&&mapView==='detailed';
+  $('#mapwrap').classList.toggle('side',side); $('#viewseg').hidden=ov; $('#lgfrag').hidden=!side; $('#maptip').hidden=side;
+  $('#viewseg').querySelectorAll('button').forEach(b=>b.setAttribute('aria-checked',String(b.dataset.v===mapView)));
+  $('#lgwhole').textContent=side?'whole token':'one whole token'; $('#lgsplit').textContent=side?'split into byte pieces':'split into bytes'; $('#lgempty').textContent=side?'unassigned / outside block':'no character';
   $('#scriptchips').querySelectorAll('button').forEach(b=>{const f=BLOCK[b.dataset.b];b.setAttribute('aria-pressed',String(b.dataset.b===id||(!!f&&!!blk&&f.lo===blk.lo&&f.hi===blk.hi)));});
   $('#maptip').textContent=ov?'One square is 64 characters. Click to zoom in.':'One square is one character. Click to pin it.';
 }
@@ -814,14 +850,19 @@ function drawMap(){
   updateMapNav();
   if($('#blocksel').value==='overview'){drawOverview();return;}
   const blk=BLOCK[$('#blocksel').value]; const D=blockLite(curEnc,blk);
-  const cell=cellSize(true), headH=18;
+  const side=mapView==='detailed', F=side?fragFor(curEnc):null;
+  const cell=side?22:cellSize(true), headH=18;
   const W=LABELW+64*(cell+GAP)+1, H=headH+D.rows*(cell+GAP)+1, ctx=sizeCanvas(W,H);
-  const cFg=cssVar('--fg'), cLine=cssVar('--line'), cMuted=cssVar('--muted'), cBg=cssVar('--bg'), cAcc=cssVar('--whole'), cSplit=cssVar('--split'), mono=cssVar('--mono'), sans=cssVar('--sans');
+  const cFg=cssVar('--fg'), cLine=cssVar('--line'), cMuted=cssVar('--muted'), cBg=cssVar('--bg'), cAcc=cssVar('--whole'), cSplit=cssVar('--split'), cFrag=cssVar('--frag'), mono=cssVar('--mono'), sans=cssVar('--sans');
   ctx.fillStyle=cBg; ctx.fillRect(0,0,W,H); ctx.textBaseline='middle';
   const multi=blk.lo>=0x80;
   ctx.font=`9px ${mono}`; ctx.fillStyle=cMuted;
   for(let c=0;c<64;c+=cell>=16?1:4)ctx.fillText((multi?0x80+c:c).toString(16).toUpperCase().padStart(2,'0'),LABELW+c*(cell+GAP)+2,headH/2);
-  for(let r=0;r<D.rows;r++)ctx.fillText(multi?hex(rowPrefix((D.r0+r)<<6)):U((D.r0+r)<<6),0,headH+r*(cell+GAP)+cell/2+1);
+  for(let r=0;r<D.rows;r++){
+    const y=headH+r*(cell+GAP), fr=F&&F[D.r0+r];
+    ctx.fillStyle=fr?cFrag:cMuted; ctx.fillText(multi?hex(rowPrefix((D.r0+r)<<6)):U((D.r0+r)<<6),0,y+cell/2+1);
+    if(fr)ctx.fillRect(LABELW-6,y,3,cell);
+  }
   for(let r=0;r<D.rows;r++){
     const y=headH+r*(cell+GAP);
     for(let c=0;c<64;c++){
@@ -840,8 +881,12 @@ function drawMap(){
     }
   }
   ctx.textAlign='left';
+  if(pinned!==null&&pinned>=blk.lo&&pinned<=blk.hi){ // outline the pinned character
+    const r=(pinned>>6)-D.r0, c=pinned&63; ctx.strokeStyle=cFrag; ctx.lineWidth=2; ctx.strokeRect(LABELW+c*(cell+GAP)-1,headH+r*(cell+GAP)-1,cell+2,cell+2); ctx.lineWidth=1;
+  }
   $('#mapstats').innerHTML=`<span class="big">${pct(D.whole,D.assigned)}</span><span class="say">of <b>${blk.name}</b> is one whole token in <b>${esc(encName())}</b></span><span class="more">${D.whole.toLocaleString()} of ${D.assigned.toLocaleString()} characters · ${U(blk.lo)}–${blk.hi.toString(16).toUpperCase()}</span>`;
-  mapInfo={blk,D,cell,headH};
+  mapInfo={blk,D,cell,headH,F};
+  if(side){const d=$('#detail');if(d.hidden||!d.innerHTML){d.innerHTML='<p class="sub">Hover or tap a cell.</p>';d.classList.remove('pinned');}d.hidden=false;d.style.left=d.style.top='';}
 }
 function cellAt(ev){
   if(!mapInfo||mapInfo.overview)return null; const {D,cell,headH}=mapInfo;
@@ -849,8 +894,22 @@ function cellAt(ev){
   if(x<0||y<0)return null; const c=Math.floor(x/(cell+GAP)), row=Math.floor(y/(cell+GAP));
   if(c<0||c>63||row<0||row>=D.rows||!D.state[row*64+c])return null; return ((D.r0+row)<<6)|c;
 }
+function showDetailSide(cp){ // the fields of the paper's figure
+  const ch=String.fromCodePoint(cp), b=encU.encode(ch), kind=KIND(ch), F=fragFor(curEnc);
+  let status, pieces;
+  if(V){
+    const ids=V.splitChar(ch), whole=ids.length===1&&V.bytes[ids[0]].length===b.length;
+    status=whole?'whole token':`<span class="inv">split into ${ids.length} tokens</span>`;
+    pieces=ids.map(id=>{const t=V.text[id];return `<span class="${t===null?'frag':''}">${t===null?hex(V.bytes[id]):esc(t)}<small>#${id}</small></span>`}).join('');
+  }else{status=bitsFor(curEnc)[cp]?'whole token':'<span class="inv">split</span>';pieces='…';}
+  const pre=b.subarray(0,b.length-1);
+  const prefixLine=pre.length>=2&&F?`<dt>prefix</dt><dd>${hex(pre)} ${F[cp>>6]?'is a fragment token':'is not a token'}</dd>`:'';
+  $('#detail').innerHTML=(kind?`<div class="big kind">${kind}</div>`:`<div class="big">${MARK.test(ch)?'◌':''}${esc(ch)}</div>`)+`<dl><dt>code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)} (${b.length} byte${b.length>1?'s':''})</dd><dt>UTF-16</dt><dd>${utf16(cp)}</dd><dt>status</dt><dd class="plain">${status}</dd><dt>encoding</dt><dd class="split">${pieces}</dd>${prefixLine}</dl>${pinned!==null?'<div class="foot">Pinned. Click it again or press Esc to release.</div>':''}`;
+  $('#detail').classList.toggle('pinned',pinned!==null);
+}
 function showDetail(cp){
   const ch=String.fromCodePoint(cp), b=encU.encode(ch); lastCp=cp;
+  if(isSide()){showDetailSide(cp);return;}
   if(!V){ // the vocabulary is still on its way: say what the bitmap knows, the pieces follow
     const w=bitsFor(curEnc)[cp], k=KIND(ch);
     $('#detail').innerHTML=(k?`<div class="big kind">${k}</div>`:`<div class="big">${MARK.test(ch)?'◌':''}${esc(ch)}</div>`)+`<dl><dt>Code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)}</dd><dt>Tokens</dt><dd class="plain">${w?'1, whole':'<span class="inv">split</span>'}</dd><dt>Pieces</dt><dd class="plain">…</dd></dl>`;
@@ -876,7 +935,12 @@ $('#map').addEventListener('click',ev=>{
   if(!mapInfo)return;
   if(mapInfo.overview){const g=overviewCell(ev);if(g!==null)openGroup(g);return;}
   const cp=cellAt(ev);if(cp===null||pinned===cp){unpin();return;}
-  pinned=cp;showDetail(cp);placeCard(ev);writeHash();});
+  pinned=cp;drawMap();showDetail(cp);placeCard(ev);writeHash();});
+$('#viewseg').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-v]');if(!b||b.dataset.v===mapView)return;
+  mapView=b.dataset.v;try{localStorage.setItem('bpl-view',mapView);}catch(err){}
+  $('#detail').hidden=true;$('#detail').innerHTML='';drawMap();if(pinned!==null){showDetail(pinned);placeCard();}writeHash();
+});
 let mapResizeT=null;
 window.addEventListener('resize',()=>{clearTimeout(mapResizeT);mapResizeT=setTimeout(drawMap,120);});
 
@@ -1094,11 +1158,11 @@ function showTab(id,noHash){
   if(!noHash)writeHash();
 }
 for(const t of TABS)$('#tab-'+t).onclick=()=>showTab(t);
-{const h=readHash(); if(h.block&&(BLOCK[h.block]||h.block==='overview'))$('#blocksel').value=h.block; if(h.cp&&/^[0-9A-F]+$/i.test(h.cp))pinned=parseInt(h.cp,16); if(h.script)covScript=h.script; if(h.cmp){const ok=h.cmp.split(',').filter(e=>[...$('#encsel').options].some(o=>o.value===e)).slice(0,4);if(ok.length)cmpSel=ok;} if(TABS.includes(h.tab))showTab(h.tab,true);}
+{const h=readHash(); if(h.view==='detailed'||h.view==='compact')mapView=h.view; if(h.block&&(BLOCK[h.block]||h.block==='overview'))$('#blocksel').value=h.block; if(h.cp&&/^[0-9A-F]+$/i.test(h.cp))pinned=parseInt(h.cp,16); if(h.script)covScript=h.script; if(h.cmp){const ok=h.cmp.split(',').filter(e=>[...$('#encsel').options].some(o=>o.value===e)).slice(0,4);if(ok.length)cmpSel=ok;} if(TABS.includes(h.tab))showTab(h.tab,true);}
 
 // URL state: #enc=qwen3&tab=map (a bare #map still opens the map)
 function readHash(){const h={};for(const kv of location.hash.slice(1).split('&')){if(!kv)continue;const [k,v]=kv.split('=');h[k]=v===undefined?'':decodeURIComponent(v);}if('map' in h)h.tab='map';return h;}
-function writeHash(){const tab=currentTab();let h='#enc='+curEnc;if(tab==='tok')h+='&tab=tok';if(tab==='map'){h+='&tab=map&block='+$('#blocksel').value;if(pinned!==null)h+='&cp='+pinned.toString(16).toUpperCase();}if(tab==='cov')h+='&tab=cov&script='+covScript;if(tab==='cmp')h+='&tab=cmp&cmp='+cmpSel.join(',');history.replaceState(null,'','#'+h.slice(1));}
+function writeHash(){const tab=currentTab();let h='#enc='+curEnc;if(tab==='tok')h+='&tab=tok';if(tab==='map'){h+='&tab=map&block='+$('#blocksel').value;if(mapView==='detailed')h+='&view=detailed';if(pinned!==null)h+='&cp='+pinned.toString(16).toUpperCase();}if(tab==='cov')h+='&tab=cov&script='+covScript;if(tab==='cmp')h+='&tab=cmp&cmp='+cmpSel.join(',');history.replaceState(null,'','#'+h.slice(1));}
 /* Switching tokenizer: the map redraws at once from the bitmap; the vocabulary follows from the worker
    and fills in everything that needs it. The veil only comes up when the visible tab can't show
    anything without the vocabulary. */
@@ -1107,6 +1171,7 @@ function showPinned(){if(pinned!==null&&!$('#pane-map').hidden&&mapInfo&&!mapInf
 // the Tokenize tab is only rendered while it is the one on screen (tokDirty)
 function renderTok(){render(); renderBars(); page=0; renderTable(); $('#tree').hidden=true; tokDirty=false;}
 function renderV(){
+  if(mapView==='detailed'&&!$('#pane-map').hidden&&mapInfo&&!mapInfo.overview&&!mapInfo.F)drawMap();
   if($('#pane-tok').hidden)tokDirty=true; else renderTok();
   if(!$('#detail').hidden&&!$('#pane-map').hidden&&mapInfo&&!mapInfo.overview&&lastCp!==null)showDetail(lastCp);
 }
