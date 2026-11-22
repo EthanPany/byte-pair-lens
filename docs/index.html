@@ -459,10 +459,11 @@ async function getData(name,onBytes){
 const saved=new Set();
 async function refreshSaved(){
   try{
-    const m=await manifest(), store=await caches.open(DATA_CACHE), have=new Set((await store.keys()).map(k=>k.url.split('/').pop()));
-    const has=f=>!m.files[f]||have.has(`${f}?v=${m.files[f].v}`);
-    saved.clear();
-    for(const o of $('#encsel').options){const e=o.value;if(m.files[e+'.json']&&has(e+'.json')&&has(e+'.merges.json'))saved.add(e);}
+    const m=await manifest(), store=await caches.open(DATA_CACHE);
+    const has=async f=>!m.files[f]||!!(await store.match(`${f}?v=${m.files[f].v}`)); // matched by full URL, so another copy of the site on the same host doesn't count
+    const found=new Set();
+    for(const o of $('#encsel').options){const e=o.value;if(m.files[e+'.json']&&await has(e+'.json')&&await has(e+'.merges.json'))found.add(e);}
+    saved.clear(); found.forEach(e=>saved.add(e));
   }catch(e){}
   if(navigator.storage&&navigator.storage.persist&&saved.size&&!/Firefox/.test(navigator.userAgent))navigator.storage.persist().catch(()=>{}); // ask the browser not to evict them
 }
