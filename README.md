@@ -51,10 +51,10 @@ node check_encoder.mjs           # expect N/N match for all three
 
 ## What it shows
 
-- **Tokenizer tab:** token strip with rank and bytes for each token; byte-fragment tokens (not a complete UTF-8 character) highlighted; chars / bytes / tokens / tokens-per-char.
-- **Vocabulary by script:** every vocab entry bucketed by Unicode range; click a bar to browse that bucket.
-- **Han coverage:** how many Han characters are whole tokens, and how many of the 300 most frequent Chinese characters are.
-- **CJK map tab:** U+4E00–9FFF (or Ext A) as a 64-column grid, one row per 2-byte UTF-8 prefix; blue = whole token, grey = falls back to byte fragments; orange marker = the prefix itself is a fragment token. Hover/tap for the exact split.
+- **Byte map** (first tab): every Unicode character laid out by its UTF-8 bytes. Opens on the whole of Unicode, one square per 64 characters, with the main scripts outlined; click to zoom into a block where one square is one character. Blue = one whole token, grey = split into bytes. Hover for the exact split, click to pin.
+- **Tokenize:** token strip with id and bytes for each token, byte fragments highlighted; the vocabulary by script; a searchable vocabulary with the merge tree of any token.
+- **Coverage:** script × tokenizer table (every character, the 1,000 most frequent, tokens per character) with CSV export, and a frequency curve per script.
+- **Compare:** the same text through up to four tokenizers.
 
 ## Vocabulary sources
 

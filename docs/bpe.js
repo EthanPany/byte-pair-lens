@@ -65,23 +65,26 @@
     return s.replace(/[.*+?^${}()|[\]\\\/-]/g, '\\$&');
   }
 
-  function load(j) {
+  // P (optional) is the output of pack(): the byte tables and decoded text already worked out in a worker,
+  // so the page only has to index them. Everything after the tables is the same code either way.
+  function load(j, P) {
     const kind = j.kind || 'bytelevel';
     const pre = j.pre || { splits: [TIKTOKEN[j.name]], ignoreMerges: true };
     const V = { name: j.name, kind, cats: j.cats, cat: j.cat, pre };
 
     if (kind === 'sp') {
       V.pieces = j.pieces;
-      V.bytes = j.pieces.map(pieceBytes);
+      V.bytes = P ? views(P) : j.pieces.map(pieceBytes);
       V.pieceId = new Map();
       j.pieces.forEach((p, i) => { if (!V.pieceId.has(p)) V.pieceId.set(p, i); });
       V.mergeRank = null; // filled by setMerges(); only needed to encode text
     } else {
-      V.bytes = j.tokens.map(b64ToBytes);
+      V.bytes = P ? views(P) : j.tokens.map(b64ToBytes);
       V.ranks = new Map();
-      V.bytes.forEach((b, i) => { const k = key(b, 0, b.length); if (!V.ranks.has(k)) V.ranks.set(k, i); });
+      if (P) P.keys.forEach((k, i) => { if (!V.ranks.has(k)) V.ranks.set(k, i); });
+      else V.bytes.forEach((b, i) => { const k = key(b, 0, b.length); if (!V.ranks.has(k)) V.ranks.set(k, i); });
     }
-    V.text = V.bytes.map(decodeOrNull);
+    V.text = P ? P.text : V.bytes.map(decodeOrNull);
     V.splitRes = (pre.splits || []).map(s => new RegExp(s, 'gu'));
 
     // added tokens (special and not) are matched in the raw text before anything else
@@ -91,13 +94,22 @@
       ? new RegExp([...V.added.keys()].sort((a, b) => b.length - a.length).map(escapeRe).join('|'), 'gu')
       : null;
 
-    V.setMerges = flat => {
-      V.mergeRank = new Map();
-      for (let r = 0, k = 0; k < flat.length; r++, k += 2) {
-        const mk = flat[k] * 524288 + flat[k + 1];
-        if (!V.mergeRank.has(mk)) V.mergeRank.set(mk, r);
-      }
-    };
+    // The merges table is large (Gemma 3: half a million pairs), so it is indexed on first use.
+    let mergeFlat = null, mergeRank = null;
+    Object.defineProperty(V, 'mergeRank', {
+      get() {
+        if (!mergeRank && mergeFlat) {
+          mergeRank = new Map();
+          for (let r = 0, k = 0; k < mergeFlat.length; r++, k += 2) {
+            const mk = mergeFlat[k] * 524288 + mergeFlat[k + 1];
+            if (!mergeRank.has(mk)) mergeRank.set(mk, r);
+          }
+        }
+        return mergeRank;
+      },
+      set(v) { mergeRank = v; },
+    });
+    V.setMerges = flat => { mergeFlat = flat; mergeRank = null; };
     V.encode = str => encode(V, str);
     // Tokens for one bare character: its UTF-8 bytes (or the character, for "sp") merged by BPE,
     // with no normalisation, no pre-tokenisation and no leading '▁'. Used by the byte map, so map
@@ -222,7 +234,45 @@
     return ids;
   }
 
-  const api = { load, hex, key, utf8, TIKTOKEN };
+  // token i's bytes as a view into one shared buffer
+  function views(P) {
+    const out = new Array(P.off.length - 1);
+    for (let i = 0; i < out.length; i++) out[i] = P.flat.subarray(P.off[i], P.off[i + 1]);
+    return out;
+  }
+  // Build a vocabulary and flatten its tables into plain data that can be handed to another thread:
+  // {meta (the file without its token list), flat + off (all token bytes), text, keys (byte-level only)}.
+  function pack(j) {
+    const V = load(j), n = V.bytes.length, off = new Uint32Array(n + 1);
+    let tot = 0;
+    for (let i = 0; i < n; i++) { off[i] = tot; tot += V.bytes[i].length; }
+    off[n] = tot;
+    const flat = new Uint8Array(tot);
+    for (let i = 0; i < n; i++) flat.set(V.bytes[i], off[i]);
+    const meta = {};
+    for (const k in j) if (k !== 'tokens') meta[k] = j[k];
+    return { meta, flat, off, text: V.text, keys: V.kind === 'sp' ? null : V.bytes.map(b => key(b, 0, b.length)) };
+  }
+  const unpack = P => load(P.meta, P);
+
+  const api = { load, pack, unpack, hex, key, utf8, TIKTOKEN };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BPE = api;
+
+  // Loaded as a Web Worker (new Worker('bpe.js')): read a vocabulary the page has already saved in Cache
+  // Storage, parse and build it here, and send the tables back, so the page never freezes on a big file.
+  if (typeof WorkerGlobalScope !== 'undefined' && root instanceof WorkerGlobalScope) {
+    root.onmessage = async ev => {
+      const { id, cacheName, vocab, merges } = ev.data;
+      try {
+        const store = await caches.open(cacheName);
+        const get = async u => { const r = await store.match(u); if (!r) throw new Error('not in cache: ' + u); return r.json(); };
+        const [j, m] = await Promise.all([get(vocab), merges ? get(merges) : null]);
+        const P = pack(j), mergesFlat = m ? Int32Array.from(m) : null;
+        root.postMessage({ id, P, merges: mergesFlat }, [P.flat.buffer, P.off.buffer].concat(mergesFlat ? [mergesFlat.buffer] : []));
+      } catch (e) {
+        root.postMessage({ id, error: String((e && e.message) || e) });
+      }
+    };
+  }
 })(typeof globalThis !== 'undefined' ? globalThis : this);

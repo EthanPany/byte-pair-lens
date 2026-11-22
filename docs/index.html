@@ -3,168 +3,190 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="Byte Pair Lens: see how GPT tokenizers split text into UTF-8 bytes and BPE merges, with script-level vocabulary breakdowns and a CJK coverage map.">
+<meta name="description" content="Byte Pair Lens: a map of which Unicode characters each LLM tokenizer keeps as one token, and which it breaks into UTF-8 bytes.">
 <title>Byte Pair Lens</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+SC:wght@400&display=swap">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%277%27 height=%277%27 fill=%27%232f5fd8%27/%3E%3Crect x=%279%27 width=%277%27 height=%277%27 fill=%27%23dcdcdc%27/%3E%3Crect y=%279%27 width=%277%27 height=%277%27 fill=%27%23dcdcdc%27/%3E%3Crect x=%279%27 y=%279%27 width=%277%27 height=%277%27 fill=%27%232f5fd8%27/%3E%3C/svg%3E">
+<link rel="preload" href="fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/ibm-plex-sans-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/bree-serif-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <style>
-/* Layout: a byte inspector in ink on paper. One column, mono-first, hairline rules instead of cards.
-   Single light theme (always white, by request). Chrome is black and white; colour is reserved for annotations:
-   whole tokens cycle through five pale tints, byte fragments are solid vermilion, the map uses blue = whole token. */
+/* Fonts come from this site's own host, so they are reachable wherever the page is. font-display:fallback
+   plus the 1.5 s cap in boot() mean a slow or blocked font file never holds the page: the system fonts in
+   the stacks below take over, and a font that arrives late does not re-flow the page.
+   Self-hosted fonts: Bree Serif for the title only, IBM Plex Sans for the interface, IBM Plex Mono only for bytes and numbers in tables.
+   Characters of other scripts fall back to the system fonts. */
+@font-face{font-family:"IBM Plex Sans";font-weight:400;font-display:fallback;src:url(fonts/ibm-plex-sans-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Sans";font-weight:500;font-display:fallback;src:url(fonts/ibm-plex-sans-latin-500-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Sans";font-weight:600;font-display:fallback;src:url(fonts/ibm-plex-sans-latin-600-normal.woff2) format("woff2")}
+@font-face{font-family:"Bree Serif";font-weight:400;font-display:fallback;src:url(fonts/bree-serif-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-weight:400;font-display:fallback;src:url(fonts/ibm-plex-mono-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-weight:500;font-display:fallback;src:url(fonts/ibm-plex-mono-latin-500-normal.woff2) format("woff2")}
+/* Ink on paper: black and white chrome, hairline rules, square corners. Colour only carries meaning:
+   blue = one whole token, grey = split into bytes, vermilion = a byte fragment. */
 :root{
-  --bg:#ffffff;--fg:#111111;--muted:#525252;--line:#d6d6d6;--tint:#f2f2f2;
+  --bg:#ffffff;--fg:#111111;--muted:#5c5c5c;--line:#d9d9d9;--tint:#f3f3f3;
   --tok-1:#dbe7fd;--tok-2:#d9f2e1;--tok-3:#fcefc7;--tok-4:#fbe0ec;--tok-5:#e8e2fb;--tok-edge:rgba(17,17,17,.14);
-  --frag:#d6400f;--frag-ink:#ffffff;--whole:#2f5fd8;
-  --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;--sans:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;--cjk:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  --frag:#d6400f;--frag-ink:#ffffff;--whole:#2f5fd8;--split:#dcdcdc;
+  --sans:"IBM Plex Sans","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC",system-ui,"Helvetica Neue",Arial,sans-serif;
+  --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;--cjk:var(--sans);
+  --h:34px; /* one control height everywhere */
   color-scheme:light;
 }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
-body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:16px;line-height:1.6;padding:40px max(16px,env(safe-area-inset-right,0px)) 64px max(16px,env(safe-area-inset-left,0px))}
-.wrap{max-width:960px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr);gap:40px}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.55;padding:28px max(20px,env(safe-area-inset-right,0px)) 96px max(20px,env(safe-area-inset-left,0px))}
+.wrap{max-width:1280px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr);gap:22px}
 .wrap>*,section,[role=tabpanel]>*{min-width:0}
-[role=tabpanel]{display:grid;grid-template-columns:minmax(0,1fr);gap:48px}
-h1{font-family:var(--mono);font-weight:500;font-size:1.6rem;margin:0 0 8px;letter-spacing:-.02em;text-wrap:balance}
-h2{font-family:var(--mono);font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 14px;font-weight:500}
-p{margin:0;max-width:65ch}
-.sub{color:var(--muted);font-size:.95rem}
-header{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap}
-.loadstatus{min-height:1.2em;text-transform:none;letter-spacing:0;font-size:.78rem;color:var(--muted)}
+[role=tabpanel]{display:grid;grid-template-columns:minmax(0,1fr);gap:44px;padding-top:6px}
+h1{font-family:"Bree Serif",Georgia,serif;font-weight:400;font-size:2.1rem;line-height:1.15;margin:0 0 2px}
+h2{font-size:1.05rem;font-weight:600;margin:0 0 12px}
+h2 small{font-weight:400;color:var(--muted);font-size:.85rem;margin-left:6px}
+p{margin:0;max-width:70ch}
+.sub{color:var(--muted);font-size:.92rem}
+header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+button,input,select,textarea{font:inherit;color:inherit;border-radius:0}
+:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+/* every chip, pill and button shares one shape */
+.chip,.btn,.pills button,.scriptchips button,.samples button,.pager button,.chips label{display:inline-flex;align-items:center;gap:7px;min-height:var(--h);padding:0 11px;font-size:.88rem;background:var(--bg);color:var(--fg);border:1px solid var(--line);cursor:pointer;white-space:nowrap;transition:border-color .12s,background .12s,color .12s}
+.chip:hover,.btn:hover,.pills button:hover,.scriptchips button:hover,.samples button:hover,.pager button:hover:not(:disabled),.chips label:hover{border-color:var(--fg)}
+.chip[aria-checked="true"],.pills button[aria-checked="true"],.scriptchips button[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
 /* tokenizer picker: a rail of chips, mirrored by a floating dock once the rail scrolls away */
-.picker{display:grid;gap:8px}
-.picklabel{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;font-family:var(--mono);font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
-.rail,.dockrail{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
-.chip{display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:.86rem;background:var(--bg);color:var(--fg);border:1px solid var(--line);padding:6px 9px 6px 8px;cursor:pointer;transition:border-color .15s,background .15s}
-.chip:hover{border-color:var(--fg)}
-.chip[aria-checked="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
-.chip .meta{display:none;font-family:var(--mono);font-size:.72rem;color:var(--muted)}
+.rail,.dockrail{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip .meta{display:none;font-family:var(--mono);font-size:.72rem;opacity:.7}
 .chip[aria-checked="true"] .meta{display:inline}
-.chip[aria-checked="true"] .meta{color:var(--bg);opacity:.75}
-.linkbtn{margin-left:auto;font:inherit;text-transform:none;letter-spacing:0;font-size:.8rem;background:none;border:0;border-bottom:1px solid var(--line);color:var(--fg);cursor:pointer;padding:0}
-.linkbtn:hover{border-bottom-color:var(--fg)}
-.gsep{align-self:center;width:1px;height:20px;background:var(--line);margin:0 3px}
-.chip.own{border-style:dashed}
+.gsep{align-self:center;width:1px;height:18px;background:var(--line);margin:0 3px}
+.chip.own{border-style:dashed;color:var(--muted)}
+.chip.own:hover{color:var(--fg)}
 .chip.busy{animation:pulse 1s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.45}}
 .logo{width:16px;height:16px;flex:none;fill:currentColor}
 .logo.badge{width:auto;height:auto;font:600 .58rem/1 var(--mono);letter-spacing:.02em;border:1px solid currentColor;padding:2px 3px}
+.note{font-size:.85rem;color:var(--muted);min-height:0}
+.note:empty{display:none}
 .dock{position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:20;display:flex;align-items:center;gap:6px;max-width:calc(100vw - 2*max(16px,env(safe-area-inset-left,0px)));background:var(--bg);border:1px solid var(--fg);box-shadow:0 6px 24px rgba(17,17,17,.12);padding:6px;transform:translate(-50%,0);transition:transform .25s ease,opacity .25s ease}
 .dock[data-state="hidden"]{transform:translate(-50%,calc(100% + 40px));opacity:0;pointer-events:none}
 .dockrail{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
-.dockrail .chip{padding:5px 9px 5px 7px;font-size:.82rem;white-space:nowrap}
 .dockrail .chip .meta{display:none}
-.dockbtn,.dockpill{font:inherit;background:var(--bg);color:var(--fg);border:1px solid var(--line);cursor:pointer;padding:5px 9px}
+.dockbtn,.dockpill{background:var(--bg);color:var(--fg);border:1px solid var(--line);cursor:pointer;min-height:var(--h);padding:0 10px}
 .dockbtn:hover,.dockpill:hover{border-color:var(--fg)}
-.dockpill{display:none;align-items:center;gap:8px;font-size:.85rem;border:0}
+.dockpill{display:none;align-items:center;gap:8px;font-size:.88rem;border:0}
 .dock[data-state="pill"]{padding:4px}
 .dock[data-state="pill"] .dockrail,.dock[data-state="pill"] .dockbtn{display:none}
 .dock[data-state="pill"] .dockpill{display:inline-flex}
-@media (max-width:760px){.dockrail{-webkit-mask-image:linear-gradient(to right,#000 82%,transparent);mask-image:linear-gradient(to right,#000 82%,transparent);padding-right:24px}} /* hint that the dock scrolls sideways */
-@media (prefers-reduced-motion:reduce){.dock{transition:none}.chip.busy{animation:none}}
-textarea{width:100%;min-height:96px;font:1rem/1.6 var(--cjk),var(--sans);background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:0;padding:12px 14px;resize:vertical}
-textarea:focus{border-color:var(--fg)}
-textarea:focus-visible,input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
-.stats{display:flex;gap:28px;flex-wrap:wrap;font-family:var(--mono);font-size:.85rem;color:var(--muted);margin-top:16px;font-variant-numeric:tabular-nums}
-.stats b{font-weight:600;color:var(--fg);font-size:1.1rem;margin-left:4px}
-.strip{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;font-family:var(--cjk),var(--mono)}
+@media (max-width:760px){.dockrail{-webkit-mask-image:linear-gradient(to right,#000 82%,transparent);mask-image:linear-gradient(to right,#000 82%,transparent);padding-right:24px}}
+.tabs{display:flex;gap:26px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.tabs button{display:inline-flex;align-items:center;gap:8px;font-weight:500;font-size:.98rem;background:none;border:0;border-bottom:2px solid transparent;padding:8px 0;color:var(--muted);cursor:pointer;margin-bottom:-1px;white-space:nowrap}
+.tabs button:hover{color:var(--fg)}
+.ti{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1}
+.ti [fill]{stroke:none}
+.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--fg);font-weight:600}
+textarea{width:100%;min-height:92px;font-size:1rem;line-height:1.6;background:var(--bg);border:1px solid var(--line);padding:11px 13px;resize:vertical}
+textarea:focus,input[type=search]:focus,select:focus{border-color:var(--fg);outline:0}
+input[type=search],select{height:var(--h);font-size:.88rem;background:var(--bg);border:1px solid var(--line);padding:0 10px}
+input[type=search]{flex:1;min-width:160px}
+.stats{display:flex;gap:28px;flex-wrap:wrap;font-size:.88rem;color:var(--muted);margin-top:16px;font-variant-numeric:tabular-nums}
+.stats b{font-weight:600;color:var(--fg);font-size:1.15rem;margin-left:5px}
+.strip{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
 .tok{padding:4px 8px;border:1px solid var(--line);background:var(--bg);display:flex;flex-direction:column;min-width:0}
 .tok.t1{background:var(--tok-1)}.tok.t2{background:var(--tok-2)}.tok.t3{background:var(--tok-3)}.tok.t4{background:var(--tok-4)}.tok.t5{background:var(--tok-5)}
 .tok[class*=" t"]{border-color:var(--tok-edge)}
 .tok .t{font-size:1.2rem;white-space:pre}
-.tok .b{font-family:var(--mono);font-size:.7rem;color:var(--muted);letter-spacing:.02em}
+.tok .b{font-family:var(--mono);font-size:.7rem;color:var(--muted)}
 .tok.frag{background:var(--frag);border-color:var(--frag)}
 .tok.frag .t{color:var(--frag-ink);font-family:var(--mono);font-size:.95rem}
 .tok.frag .b{color:var(--frag-ink);opacity:.85}
-.legend,.mlegend{display:flex;gap:18px;flex-wrap:wrap;font-size:.85rem;color:var(--muted);margin-top:12px}
-.legend span::before,.mlegend span::before{content:"";display:inline-block;width:10px;height:10px;margin-right:6px;vertical-align:-1px;border:1px solid var(--fg)}
-.legend .f::before{background:var(--frag);border-color:var(--frag)}
-.legend .w::before{background:linear-gradient(90deg,var(--tok-1) 0 33%,var(--tok-2) 33% 66%,var(--tok-3) 66%);border-color:var(--tok-edge)}
+.legend,.mlegend{display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:.85rem;color:var(--muted)}
+.legend{margin-top:12px}
+.legend span::before,.mlegend span::before{content:"";display:inline-block;width:11px;height:11px;margin-right:6px;vertical-align:-1px}
+.legend .f::before{background:var(--frag)}
+.legend .w::before{background:linear-gradient(90deg,var(--tok-1) 0 33%,var(--tok-2) 33% 66%,var(--tok-3) 66%);outline:1px solid var(--tok-edge);outline-offset:-1px}
+.mlegend .whole::before{background:var(--whole)}
+.mlegend .none::before{background:var(--split)}
+.mlegend .empty::before{background:var(--bg);outline:1px dashed #bbb;outline-offset:-1px}
+.mlegend .cumall::before{background:var(--muted);height:2px;vertical-align:3px}
+.mlegend .tip{color:var(--fg)}
+.mlegend .tip::before{display:none}
 .samples{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
-.samples button{font:inherit;font-size:.85rem;background:none;border:1px solid var(--line);padding:3px 10px;color:var(--muted);cursor:pointer;font-family:var(--cjk),var(--sans)}
-.samples button:hover{border-color:var(--fg);color:var(--fg)}
-.bars{display:grid;gap:4px;font-family:var(--mono);font-size:.82rem;font-variant-numeric:tabular-nums}
-.bar{display:grid;grid-template-columns:minmax(140px,220px) 1fr 124px;align-items:center;gap:10px;cursor:pointer;padding:3px 4px;border:0;background:none;color:var(--fg);text-align:left;font:inherit}
+.samples button{color:var(--muted)}
+.samples button:hover{color:var(--fg)}
+.bars{display:grid;gap:3px;font-size:.86rem;font-variant-numeric:tabular-nums}
+.bar{display:grid;grid-template-columns:minmax(140px,220px) 1fr 124px;align-items:center;gap:10px;cursor:pointer;padding:4px;border:0;background:none;text-align:left}
 .bar:hover,.bar[aria-pressed="true"]{background:var(--tint)}
-.bar[aria-pressed="true"] .lab{text-decoration:underline;text-underline-offset:3px}
 .bar .lab{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar[aria-pressed="true"] .lab{font-weight:600}
 .bar .rail{display:block;height:10px;background:var(--line);overflow:hidden;min-width:0}
 .bar .fill{display:block;height:100%;background:var(--fg);transition:width .3s}
 .bar[data-cat="1"] .fill{background:var(--frag)}
-.bar .n{text-align:right;color:var(--muted)}
-.hint{font-size:.85rem;color:var(--muted);margin-top:12px}
+.bar .n{text-align:right;color:var(--muted);font-family:var(--mono);font-size:.78rem}
 .ctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
-input[type=search],select{font:inherit;font-size:.9rem;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:0;padding:6px 10px}
-input[type=search]{flex:1;min-width:160px;font-family:var(--cjk),var(--mono)}
-input[type=search]:focus,select:focus{border-color:var(--fg)}
 .tbl{overflow-x:auto;border-top:1px solid var(--fg)}
-table{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:.85rem;font-variant-numeric:tabular-nums}
+table{border-collapse:collapse;width:100%;font-size:.88rem;font-variant-numeric:tabular-nums}
 th,td{padding:8px 14px 8px 0;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
-th{color:var(--muted);font-weight:600;font-size:.74rem;text-transform:uppercase;letter-spacing:.1em}
-td.txt{font-family:var(--cjk),var(--mono);font-size:1.05rem}
+th{color:var(--muted);font-weight:500;font-size:.8rem}
+td.txt{font-size:1.05rem}
 td.hex,td.cat{color:var(--muted)}
-td.cat{font-size:.8rem}
-.inv{background:var(--frag);color:var(--frag-ink);padding:0 4px}
-.pager{display:flex;gap:10px;align-items:center;margin-top:12px;font-family:var(--mono);font-size:.85rem;color:var(--muted)}
-.pager button{font:inherit;background:none;border:1px solid var(--line);color:var(--fg);padding:3px 10px;cursor:pointer}
-.pager button:hover:not(:disabled){border-color:var(--fg)}
+td.hex,td.num,.mono{font-family:var(--mono);font-size:.82rem}
+.inv{background:var(--frag);color:var(--frag-ink);padding:0 4px;font-family:var(--mono);font-size:.82rem}
+.pager{display:flex;gap:10px;align-items:center;margin-top:12px;font-size:.88rem;color:var(--muted)}
 .pager button:disabled{opacity:.35;cursor:default}
-.loading{font-family:var(--mono);font-size:.85rem;color:var(--muted)}
+.loading{font-size:.88rem;color:var(--muted)}
 .panel{border-top:1px solid var(--fg);padding-top:14px;min-width:0}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:40px}
-@media (max-width:640px){.two{grid-template-columns:1fr}.bar{grid-template-columns:minmax(90px,120px) 1fr 96px}}
-@media (prefers-reduced-motion:reduce){.bar .fill{transition:none}}
+.two{display:grid;grid-template-columns:1.4fr 1fr;gap:44px}
+@media (max-width:760px){.two{grid-template-columns:1fr}.bar{grid-template-columns:minmax(90px,120px) 1fr 96px}}
 .ws{opacity:.5}
-.num{font-family:var(--mono);font-weight:600;color:var(--fg)}
-#han p+p{margin-top:10px}
-.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line)}
-.tabs button{font:600 .85rem var(--mono);text-transform:uppercase;letter-spacing:.06em;background:none;border:0;border-bottom:1px solid transparent;padding:8px 0;color:var(--muted);cursor:pointer;margin-bottom:-1px}
-.tabs button:hover{color:var(--fg)}
-.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--fg)}
-.mapwrap{display:grid;grid-template-columns:1fr minmax(220px,280px);gap:24px}
-.mapwrap>*{min-width:0}
-@media (max-width:760px){.mapwrap{grid-template-columns:1fr}}
-.mapscroll{overflow:auto;max-height:70vh;border:1px solid var(--line);background:var(--bg);position:relative}
-.mapscroll canvas{display:block;image-rendering:pixelated}
-.mlegend{margin:10px 0}
-.mlegend .whole::before{background:var(--whole);border-color:var(--whole)}
-.mlegend .none::before{background:var(--line);border-color:var(--line)}
-.mlegend .fragrow::before{width:3px;background:var(--frag);border-color:var(--frag)}
-.mlegend .empty::before{background:var(--bg);border:1px dashed var(--line)}
-.detail{font-family:var(--mono);font-size:.88rem;display:grid;gap:8px;align-content:start}
-.detail .big{font-family:var(--cjk);font-size:4.5rem;line-height:1;text-align:center;padding:16px 0;border-bottom:1px solid var(--line)}
-.detail dl{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;margin:0}
-.detail dt{color:var(--muted)}.detail dd{margin:0;overflow-wrap:anywhere}
+.num{font-weight:600;color:var(--fg)}
+#han p+p{margin-top:8px}
+/* byte map */
+.headline{display:flex;align-items:baseline;gap:6px 14px;flex-wrap:wrap;margin-bottom:14px}
+.headline .big{font-size:2.5rem;font-weight:600;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--whole)}
+.headline .say{font-size:1.1rem}
+.headline .say b{font-weight:600}
+.headline .more{color:var(--muted);font-size:.88rem;font-variant-numeric:tabular-nums;margin-left:auto}
+.headline .more b{color:var(--fg);font-weight:600}
+.mapnav{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.scriptchips{display:contents}
+.maplegend input{flex:0 1 240px;min-width:170px;margin-left:auto}
+.mapscroll{overflow:auto;border:1px solid var(--line);background:var(--bg);position:relative}
+.mapscroll.block{max-height:74vh}
+.mapscroll canvas{display:block;cursor:crosshair}
+.mapscroll.over canvas{cursor:zoom-in}
+.mlegend.maplegend{margin-bottom:10px}
+.detail{position:fixed;z-index:30;width:260px;background:var(--bg);border:1px solid var(--fg);box-shadow:0 8px 28px rgba(17,17,17,.16);padding:12px 14px;font-size:.86rem;display:grid;gap:8px;pointer-events:none}
+.detail.pinned{pointer-events:auto}
+.detail .big{font-size:3.4rem;line-height:1.1;text-align:center;padding:4px 0 10px;border-bottom:1px solid var(--line);overflow:hidden}
+.detail .big.sm{font-size:1.5rem;letter-spacing:.12em;padding:10px 0 12px}
+.detail .big.kind{font-size:.95rem;color:var(--muted);padding:18px 0}
+.detail dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0}
+.detail dt{color:var(--muted)}.detail dd{margin:0;overflow-wrap:anywhere;font-family:var(--mono);font-size:.8rem;align-self:center}
+.detail dd.plain{font-family:var(--sans);font-size:.86rem}
 .detail .split{display:flex;gap:4px;flex-wrap:wrap}
-.detail .split span{padding:2px 6px;background:var(--tok-1);border:1px solid var(--tok-edge)}
-.detail .split span.frag{background:var(--frag);border-color:var(--frag);color:var(--frag-ink)}
-.rowstats{font-family:var(--mono);font-size:.85rem;color:var(--muted);font-variant-numeric:tabular-nums;display:flex;gap:20px;flex-wrap:wrap;margin-bottom:8px}
-.rowstats b{color:var(--fg);font-weight:600}
+.detail .split span{padding:1px 5px;background:var(--tok-1);border:1px solid var(--tok-edge);font-family:var(--sans)}
+.detail .split span.frag{background:var(--frag);border-color:var(--frag);color:var(--frag-ink);font-family:var(--mono)}
+.detail .foot{color:var(--muted);font-size:.8rem}
+/* coverage */
 .pills{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
-.pills button{font:inherit;font-size:.85rem;background:var(--bg);color:var(--muted);border:1px solid var(--line);padding:5px 12px;cursor:pointer}
-.pills button:hover{border-color:var(--fg);color:var(--fg)}
-.pills button[aria-checked="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
-.covtbl table{font-size:.85rem}
-.covtbl th{cursor:pointer;white-space:nowrap}
+.covtbl th{cursor:pointer}
 .covtbl th[aria-sort]::after{content:" ↓"}
-.covtbl td.v{text-align:right;cursor:pointer;min-width:72px;border-left:2px solid var(--bg)}
+.covtbl td.v{text-align:right;cursor:pointer;min-width:72px;border-left:2px solid var(--bg);font-family:var(--mono);font-size:.82rem}
 .covtbl td.v:hover{outline:2px solid var(--fg);outline-offset:-2px}
 .covtbl td.v.sel{outline:2px solid var(--frag);outline-offset:-2px}
-.covtbl td.sname{font-family:var(--sans)}
-.covtbl td.sname small{display:block;color:var(--muted);font-size:.75rem}
-.covfoot{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
-.btn{font:inherit;font-size:.85rem;background:var(--bg);color:var(--fg);border:1px solid var(--fg);padding:5px 12px;cursor:pointer}
+.covtbl td.sname small{display:block;color:var(--muted);font-size:.78rem}
+.covfoot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}
+.btn{border-color:var(--fg)}
 .btn:hover{background:var(--fg);color:var(--bg)}
-.covsum{font-size:1rem;max-width:70ch;margin:8px 0 12px}
-.covchartwrap{border:1px solid var(--line);padding:8px 8px 4px}
+.covsum{font-size:1rem;max-width:80ch;margin:10px 0 12px}
+.covchartwrap{border:1px solid var(--line);padding:8px 8px 4px;margin-bottom:10px}
 .covchartwrap canvas{display:block;width:100%;height:240px}
-.mlegend .cumall::before{background:var(--muted);border-color:var(--muted);height:2px;vertical-align:3px}
+.covchips{display:flex;flex-wrap:wrap;gap:6px}
+/* compare */
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 4px}
-.chips label{display:inline-flex;align-items:center;gap:6px;font-size:.85rem;border:1px solid var(--line);padding:4px 10px;cursor:pointer;user-select:none}
+.chips label{user-select:none}
 .chips label:has(input:checked){border-color:var(--fg);background:var(--tint)}
 .chips label:has(input:disabled){opacity:.45;cursor:default}
 .chips input{accent-color:var(--fg);margin:0}
 .cmprow{border-top:1px solid var(--line);padding:14px 0 6px}
-.cmphead{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;margin-bottom:8px;font-family:var(--mono);font-size:.85rem;color:var(--muted);font-variant-numeric:tabular-nums}
-.cmphead .nm{font-family:var(--sans);font-size:1rem;color:var(--fg);font-weight:600;min-width:200px}
+.cmphead{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;margin-bottom:8px;font-size:.88rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.cmphead .nm{font-size:1rem;color:var(--fg);font-weight:600;min-width:160px}
 .cmphead b{color:var(--fg);font-weight:600}
 .cmpbar{flex-basis:100%;height:6px;background:var(--line)}
 .cmpbar span{display:block;height:100%;background:var(--fg)}
@@ -172,210 +194,186 @@ td.cat{font-size:.8rem}
 .strip.compact .tok{padding:2px 5px}
 .strip.compact .tok .t{font-size:1rem}
 .strip.compact .tok.frag .t{font-size:.8rem}
+/* vocabulary browser and merge tree */
 #rows tr{cursor:pointer}
 #rows tr:hover td{background:var(--tint)}
 #rows tr.sel td{background:var(--tok-1)}
-.tree{border:1px solid var(--line);padding:12px 14px;margin-top:10px;font-family:var(--mono);font-size:.85rem;overflow-x:auto}
-.tree h3{margin:0 0 8px;font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:500}
+.tree{border:1px solid var(--line);padding:12px 14px;margin-top:12px;font-size:.88rem;overflow-x:auto}
+.tree h3{margin:0 0 8px;font-size:.92rem;font-weight:600}
 .tree ul{list-style:none;margin:0;padding-left:22px;border-left:1px solid var(--line)}
 .tree>ul{padding-left:0;border-left:0}
 .tree li{margin:3px 0;white-space:nowrap}
 .tree .nd{display:inline-flex;gap:8px;align-items:baseline;padding:1px 6px;border:1px solid var(--tok-edge);background:var(--tok-1)}
-.tree .nd.frag{background:var(--frag);border-color:var(--frag);color:var(--frag-ink)}
+.tree .nd.frag{background:var(--frag);border-color:var(--frag);color:var(--frag-ink);font-family:var(--mono)}
 .tree .nd.leaf{background:var(--bg)}
-.tree .nd small{color:var(--muted);font-size:.72rem}
+.tree .nd small{color:var(--muted);font-size:.72rem;font-family:var(--mono)}
 .tree .nd.frag small{color:var(--frag-ink);opacity:.8}
 .tree .nd.leaf.frag{background:var(--bg);color:var(--frag);border-color:var(--frag)}
 .tree .nd.leaf.frag small{color:var(--frag);opacity:.8}
-.howto{margin:-4px 0 12px}
-.howto summary{cursor:pointer;font-size:.88rem;color:var(--muted);width:max-content}
-.howto summary:hover{color:var(--fg)}
-.howto p{margin-top:8px}
-.mapnav{display:grid;gap:10px;margin-bottom:12px}
-.crumbs{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:.95rem;min-height:32px}
-.crumbs .sepch{color:var(--muted);margin:0 6px}
-.crumbs .here{font-weight:600}
-.crumbs .rng{font-family:var(--mono);font-size:.78rem;color:var(--muted)}
-.scriptchips{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
-.scriptchips .glab{font-family:var(--mono);font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:0 2px 0 8px}
-.scriptchips .glab:first-child{margin-left:0}
-.scriptchips button{font:inherit;font-size:.82rem;background:var(--bg);color:var(--fg);border:1px solid var(--line);padding:4px 9px;cursor:pointer}
-.scriptchips button:hover{border-color:var(--fg)}
-.scriptchips button[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
-.mapctl{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.mapctl input{flex:1;min-width:220px}
-.seg{display:inline-flex;align-items:center;border:1px solid var(--line)}
-.seg span{font-family:var(--mono);font-size:.72rem;color:var(--muted);padding:0 8px;text-transform:uppercase;letter-spacing:.06em}
-.seg button{font:inherit;font-size:.82rem;background:var(--bg);color:var(--fg);border:0;border-left:1px solid var(--line);padding:5px 11px;cursor:pointer}
-.seg button[aria-checked="true"]{background:var(--fg);color:var(--bg)}
-footer{font-family:var(--mono);font-size:.8rem;color:var(--muted);border-top:1px solid var(--line);padding-top:14px}
-footer a{color:var(--fg);text-underline-offset:3px}
+footer{font-size:.85rem;color:var(--muted);border-top:1px solid var(--line);padding-top:14px;display:flex;gap:18px}
+footer a{color:var(--muted);text-underline-offset:3px}
+footer a:hover{color:var(--fg)}
+/* loading: the page blurs under a progress card until the data is here */
+.veil{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:rgba(255,255,255,.62);-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px);transition:opacity .2s}
+.veil[data-on="0"]{opacity:0;pointer-events:none}
+.veilcard{width:min(340px,calc(100vw - 48px));background:var(--bg);border:1px solid var(--fg);padding:18px 20px;box-shadow:0 8px 28px rgba(17,17,17,.14);display:grid;gap:10px}
+.veilcard .what{font-weight:600}
+.veilbar{height:4px;background:var(--line);overflow:hidden}
+.veilbar span{display:block;height:100%;width:0;background:var(--fg);transition:width .15s linear}
+.veilcard .how{font-size:.82rem;color:var(--muted);font-variant-numeric:tabular-nums;min-height:1.3em}
+.veilcard.err .veilbar{display:none}
+.veilcard.err .how{color:var(--frag)}
+.veilcard .btn{justify-self:start}
+@media (max-width:760px){h1{font-size:1.7rem}.rail,.mapnav,.covchips,.tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}.gsep{flex:none}.headline .big{font-size:2rem}.headline .more{margin-left:0}.mlegend .tip{flex-basis:100%}}
+@media (prefers-reduced-motion:reduce){.dock,.veil,.veilbar span,.bar .fill{transition:none}.chip.busy{animation:none}}
 </style>
 </head>
 <body>
 
+<div class="veil" id="veil" data-on="1" role="status" aria-live="polite">
+  <div class="veilcard" id="veilcard"><div class="what" id="veilwhat">Loading</div><div class="veilbar"><span id="veilfill"></span></div><div class="how" id="veilhow"></div><button class="btn" id="veilretry" hidden>Try again</button></div>
+</div>
+
 <div class="wrap">
   <header>
-    <div>
-      <h1>Byte Pair Lens</h1>
-      <p class="sub">How LLM tokenizers cut text into bytes and merges. Paste anything; byte-fragment tokens are the ones that don't form a whole character.</p>
-    </div>
+    <h1>Byte Pair Lens</h1>
   </header>
-  <div class="picker" id="picker">
-    <div class="picklabel"><span>Tokenizer</span><span id="loadstatus" class="loadstatus" aria-live="polite"></span><button class="linkbtn" id="ownbtn" title="Load a Hugging Face tokenizer.json from your computer. It stays in this tab and is never uploaded.">Load your own tokenizer.json ↑</button></div>
-    <div class="rail" id="encrail" role="radiogroup" aria-label="Tokenizer"></div>
-    <select id="encsel" hidden aria-hidden="true" tabindex="-1">
-        <optgroup label="OpenAI · byte-level BPE (tiktoken)">
-          <option value="r50k_base">GPT-2 / GPT-3 · r50k_base · 50k tokens</option>
-          <option value="cl100k_base" selected>GPT-4 / GPT-3.5 · cl100k_base · 100k tokens</option>
-          <option value="o200k_base">GPT-4o / o1 · o200k_base · 200k tokens</option>
-        </optgroup>
-        <optgroup label="Open models · byte-level BPE">
-          <option value="llama3.1">Llama 3.1 (Meta) · 128k tokens</option>
-          <option value="qwen3">Qwen3 (Alibaba) · 152k tokens</option>
-          <option value="deepseek-v3">DeepSeek-V3 · 129k tokens</option>
-        </optgroup>
-        <optgroup label="Open models · BPE with byte fallback">
-          <option value="gemma3">Gemma 3 (Google) · 262k tokens</option>
-          <option value="mistral-v0.3">Mistral 7B v0.3 · 33k tokens</option>
-        </optgroup>
-        <optgroup label="Your own" id="owngroup">
-          <option value="__upload">Load a tokenizer.json from your computer…</option>
-        </optgroup>
-      </select>
-    <input type="file" id="ownfile" accept=".json,application/json" hidden>
-  </div>
+  <div class="rail" id="encrail" role="radiogroup" aria-label="Tokenizer"></div>
+  <p class="note" id="loadstatus" aria-live="polite"></p>
+  <select id="encsel" hidden aria-hidden="true" tabindex="-1">
+    <optgroup label="OpenAI · byte-level BPE (tiktoken)">
+      <option value="r50k_base">GPT-2 / GPT-3 · r50k_base · 50k tokens</option>
+      <option value="cl100k_base" selected>GPT-4 / GPT-3.5 · cl100k_base · 100k tokens</option>
+      <option value="o200k_base">GPT-4o / o1 · o200k_base · 200k tokens</option>
+    </optgroup>
+    <optgroup label="Open models · byte-level BPE">
+      <option value="llama3.1">Llama 3.1 (Meta) · 128k tokens</option>
+      <option value="qwen3">Qwen3 (Alibaba) · 152k tokens</option>
+      <option value="deepseek-v3">DeepSeek-V3 · 129k tokens</option>
+    </optgroup>
+    <optgroup label="Open models · BPE with byte fallback">
+      <option value="gemma3">Gemma 3 (Google) · 262k tokens</option>
+      <option value="mistral-v0.3">Mistral 7B v0.3 · 33k tokens</option>
+    </optgroup>
+    <optgroup label="Your own" id="owngroup">
+      <option value="__upload">Load a tokenizer.json from your computer…</option>
+    </optgroup>
+  </select>
+  <input type="file" id="ownfile" accept=".json,application/json" hidden>
   <div class="dock" id="dock" data-state="hidden" aria-label="Tokenizer (floating)">
     <div class="dockrail" id="dockrail" role="radiogroup" aria-label="Tokenizer"></div>
     <button class="dockbtn" id="dockhide" aria-label="Hide tokenizer bar" title="Hide">▾</button>
     <button class="dockpill" id="dockpill" aria-label="Show tokenizer bar" title="Show tokenizers"></button>
   </div>
-  
 
   <div class="tabs" role="tablist">
-    <button role="tab" id="tab-tok" aria-selected="true" aria-controls="pane-tok">Tokenizer</button>
-    <button role="tab" id="tab-map" aria-selected="false" aria-controls="pane-map">Byte map</button>
-    <button role="tab" id="tab-cov" aria-selected="false" aria-controls="pane-cov">Coverage</button>
-    <button role="tab" id="tab-cmp" aria-selected="false" aria-controls="pane-cmp">Compare</button>
+    <button role="tab" id="tab-map" aria-selected="true" aria-controls="pane-map"><svg class="ti" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="4" height="4" fill="currentColor"/><rect x="6" y="1" width="4" height="4" fill="currentColor"/><rect x="11.5" y="1.5" width="3" height="3"/><rect x="1.5" y="6.5" width="3" height="3"/><rect x="6" y="6" width="4" height="4" fill="currentColor"/><rect x="11.5" y="6.5" width="3" height="3"/><rect x="1.5" y="11.5" width="3" height="3"/><rect x="6.5" y="11.5" width="3" height="3"/><rect x="11" y="11" width="4" height="4" fill="currentColor"/></svg>Byte map</button>
+    <button role="tab" id="tab-tok" aria-selected="false" aria-controls="pane-tok"><svg class="ti" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="5.5" width="13" height="5"/><path d="M5.5 3v10M10.5 3v10"/></svg>Tokenize</button>
+    <button role="tab" id="tab-cov" aria-selected="false" aria-controls="pane-cov"><svg class="ti" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 14.5h13"/><rect x="2.5" y="8.5" width="2.5" height="6" fill="currentColor"/><rect x="6.75" y="2.5" width="2.5" height="12" fill="currentColor"/><rect x="11" y="5.5" width="2.5" height="9" fill="currentColor"/></svg>Coverage</button>
+    <button role="tab" id="tab-cmp" aria-selected="false" aria-controls="pane-cmp"><svg class="ti" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="4"/><rect x="1.5" y="9.5" width="8" height="4"/><path d="M6 2.5v4M10.5 2.5v4M5.5 9.5v4"/></svg>Compare</button>
   </div>
 
-  <div id="pane-map" role="tabpanel" hidden>
+  <div id="pane-map" role="tabpanel">
     <section>
-      <h2>Every character by its UTF-8 bytes</h2>
-      <details class="howto"><summary>How to read the map</summary><p class="sub">One cell per character. Each row is every UTF-8 byte except the last (e.g. <span style="font-family:var(--mono)">E4 B8</span>); each column is the last byte, 80–BF, so a row holds 64 consecutive code points. The same rule covers 2-, 3- and 4-byte characters. A cell is blue when the selected tokenizer has that character as one whole token; otherwise the character is split into pieces of its bytes. A vermilion marker means the row prefix itself is a fragment token, so the characters in that row that aren't whole tokens cost two tokens instead of one per byte.</p></details>
+      <div class="headline" id="mapstats"></div>
       <select id="blocksel" hidden aria-hidden="true" tabindex="-1"></select>
-      <select id="cellsel" hidden aria-hidden="true" tabindex="-1"><option value="9">small</option><option value="14" selected>medium</option><option value="22">large</option></select>
       <div class="mapnav">
-        <div class="crumbs"><button class="btn" id="backov" hidden title="Back to the whole of Unicode (Esc)">← All of Unicode</button><span id="crumbs"></span></div>
         <div class="scriptchips" id="scriptchips" role="group" aria-label="Scripts"></div>
-        <div class="mapctl">
-          <input type="search" id="blocksearch" list="blocklist" placeholder="Jump to any Unicode block: Tamil, Runic, Emoticons…" aria-label="Jump to a Unicode block">
-          <datalist id="blocklist"></datalist>
-          <div class="seg" id="cellseg" role="radiogroup" aria-label="Cell size"><span>Cells</span><button role="radio" data-v="9" aria-checked="false">S</button><button role="radio" data-v="14" aria-checked="true">M</button><button role="radio" data-v="22" aria-checked="false" title="Large cells show each character">L</button></div>
-        </div>
       </div>
-      <div class="rowstats" id="mapstats"></div>
-      <div class="mlegend" id="maplegend"><span class="whole">whole token</span><span class="none">split into byte pieces</span><span class="fragrow">row prefix is a fragment token</span><span class="empty">unassigned / outside block</span></div>
-      <p class="sub" id="mapnote" hidden></p>
-      <div class="mapwrap">
-        <div class="mapscroll" id="mapscroll"><canvas id="map"></canvas></div>
-        <div class="detail" id="detail"><p class="sub">Hover or tap a cell.</p></div>
+      <div class="mlegend maplegend"><span class="whole">one whole token</span><span class="none">split into bytes</span><span class="empty" title="Unassigned, or outside this block">no character</span><span class="tip" id="maptip"></span>
+        <input type="search" id="blocksearch" list="blocklist" placeholder="Find any Unicode block…" aria-label="Jump to a Unicode block">
+        <datalist id="blocklist"></datalist>
       </div>
+      <div class="mapscroll over" id="mapscroll"><canvas id="map"></canvas></div>
+      <div class="detail" id="detail" hidden></div>
     </section>
+  </div>
+
+  <div id="pane-tok" role="tabpanel" hidden>
+  <section>
+    <textarea id="input" spellcheck="false" aria-label="Text to tokenize">今天天气很好。The weather is nice today. 날씨가 좋다 — numéro 2024!</textarea>
+    <div class="samples" id="samples">
+      <button data-s="今天天气很好。">今天天气很好</button>
+      <button data-s="我爱你，语言模型。">我爱你，语言模型</button>
+      <button data-s="龘齉爨靐">龘齉爨靐</button>
+      <button data-s="Większość programów używa UTF-8.">Polish</button>
+      <button data-s="The quick brown fox jumps over the lazy dog.">English</button>
+      <button data-s="def tokenize(text: str) -> list[int]:
+    return [ord(c) for c in text]">Python</button>
+      <button data-s="😀🎉 ≥ 1234567">😀🎉 ≥ 1234567</button>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="strip" id="strip"></div>
+    <div class="legend"><span class="w">whole token</span><span class="f">byte fragment</span></div>
+  </section>
+
+  <div class="two">
+    <section class="panel">
+      <h2>Vocabulary by script <small id="vsize"></small></h2>
+      <div class="bars" id="bars" title="Bar length is on a square-root scale. Click a row to browse it below."></div>
+    </section>
+    <section class="panel">
+      <h2>Han characters</h2>
+      <div id="han"></div>
+    </section>
+  </div>
+
+  <section>
+    <h2>Vocabulary</h2>
+    <div class="ctl">
+      <input type="search" id="q" placeholder="Search tokens: 天, ing…" aria-label="Search tokens">
+      <select id="catsel" aria-label="Category"><option value="-1">all categories</option></select>
+      <select id="sort" aria-label="Sort"><option value="rank">by merge rank</option><option value="len">longest first</option></select>
+    </div>
+    <div class="tbl"><table><thead><tr><th>rank</th><th>token</th><th>bytes</th><th>length</th><th>category</th></tr></thead><tbody id="rows" title="Click a token to see how BPE built it"></tbody></table></div>
+    <div class="pager"><button id="prev">‹ Prev</button><span id="pginfo"></span><button id="next">Next ›</button></div>
+    <div id="tree" class="tree" hidden></div>
+  </section>
   </div>
 
   <div id="pane-cov" role="tabpanel" hidden>
     <section>
-      <h2>How much real text each tokenizer keeps whole</h2>
-      <p class="sub" style="margin-bottom:12px">Characters are weighted by how often they appear in a fixed Wikipedia sample, so common characters count more than rare ones. Each character is measured on its own, as in the byte map. Click a cell to see that script in detail.</p>
       <div class="pills" role="radiogroup" aria-label="Metric" id="covmetric">
-        <button role="radio" aria-checked="true" data-m="weighted">Share of real text that is whole tokens</button>
-        <button role="radio" aria-checked="false" data-m="topWhole">Most frequent 1,000 characters</button>
-        <button role="radio" aria-checked="false" data-m="wholeAll">Every character in the block</button>
-        <button role="radio" aria-checked="false" data-m="tokPerChar">Tokens per character in real text</button>
+        <button role="radio" aria-checked="true" data-m="wholeAll" title="Share of every character in the block that is one whole token: the same count as the byte map">Every character</button>
+        <button role="radio" aria-checked="false" data-m="topWhole" title="Share of the 1,000 most frequent characters that are one whole token">1,000 most frequent</button>
+        <button role="radio" aria-checked="false" data-m="tokPerChar" title="Average tokens per character in running text. 1.00 is best.">Tokens per character</button>
       </div>
-      <div class="tbl covtbl"><table id="covtable"><tbody><tr><td class="loading">loading coverage table…</td></tr></tbody></table></div>
-      <div class="covfoot"><p class="hint" id="covnote"></p><button id="covcsv" class="btn">Download CSV</button></div>
+      <div class="tbl covtbl"><table id="covtable"></table></div>
+      <div class="covfoot"><p class="sub" id="covnote"></p><button id="covcsv" class="btn">Download CSV</button></div>
     </section>
     <section>
-      <h2 id="covtitle">Characters ranked by how often they appear</h2>
-      <select id="covscript" hidden aria-hidden="true" tabindex="-1"></select><div class="scriptchips" id="covchips" role="group" aria-label="Script" style="margin-bottom:6px"></div><p class="hint" style="margin:0 0 4px">Tokenizer: the one selected at the top of the page (or in the floating bar).</p>
+      <h2 id="covtitle"></h2>
+      <select id="covscript" hidden aria-hidden="true" tabindex="-1"></select>
+      <div class="scriptchips covchips" id="covchips" role="group" aria-label="Script"></div>
       <p id="covsummary" class="covsum"></p>
       <div class="covchartwrap"><canvas id="covchart" aria-label="Cumulative share of text against frequency rank"></canvas></div>
-      <div class="mlegend"><span class="cumall">all characters (share of text so far)</span><span class="whole">characters that are whole tokens</span><span class="none">barcode: each rank, blue if whole</span></div>
-      <h2 style="margin-top:20px">Most frequent characters that get split</h2>
+      <div class="mlegend"><span class="cumall">all characters</span><span class="whole">characters that are whole tokens</span></div>
+      <h2 style="margin-top:28px">Most frequent characters that get split</h2>
       <div class="tbl"><table id="covsplit"></table></div>
     </section>
   </div>
 
   <div id="pane-cmp" role="tabpanel" hidden>
     <section>
-      <h2>Same text, several tokenizers</h2>
-      <p class="sub" style="margin-bottom:10px">Type once and see how each tokenizer cuts it. Vermilion chips are byte fragments. Hover a chip for its token id and bytes. Pick up to four tokenizers.</p>
       <textarea id="cmpinput" spellcheck="false" aria-label="Text to compare">今天天气很好。오늘 날씨가 좋다. आज मौसम अच्छा है। The weather is nice today.</textarea>
       <div class="samples" id="cmpsamples">
-        <button data-s="今天天气很好。오늘 날씨가 좋다. आज मौसम अच्छा है। The weather is nice today.">same sentence, 4 languages</button>
+        <button data-s="今天天气很好。오늘 날씨가 좋다. आज मौसम अच्छा है। The weather is nice today.">4 languages</button>
         <button data-s="我爱你，语言模型。">Chinese</button>
-        <button data-s="龘齉爨靐 𠀀𠀁">rare Hanzi</button>
+        <button data-s="龘齉爨靐 𠀀𠀁">Rare Han</button>
         <button data-s="안녕하세요, 만나서 반갑습니다.">Korean</button>
         <button data-s="مرحبا بالعالم، كيف حالك؟">Arabic</button>
         <button data-s="नमस्ते दुनिया, आप कैसे हैं?">Hindi</button>
-        <button data-s="😀🎉 👍🏽 👨‍👩‍👧 🇨🇳">emoji</button>
+        <button data-s="😀🎉 👍🏽 👨‍👩‍👧 🇨🇳">Emoji</button>
       </div>
-      <div class="chips" id="cmppick" role="group" aria-label="Tokenizers to compare"></div>
+      <div class="chips" id="cmppick" role="group" aria-label="Tokenizers to compare (up to four)" title="Up to four"></div>
       <div id="cmprows"></div>
     </section>
   </div>
 
-  <div id="pane-tok" role="tabpanel">
-  <section>
-    <h2>Tokenize</h2>
-    <textarea id="input" spellcheck="false">今天天气很好。The weather is nice today. 날씨가 좋다 — numéro 2024!</textarea>
-    <div class="samples" id="samples">
-      <button data-s="今天天气很好。">今天天气很好</button>
-      <button data-s="我爱你，语言模型。">我爱你，语言模型</button>
-      <button data-s="龘齉爨靐">rare: 龘齉爨靐</button>
-      <button data-s="Większość programów używa UTF-8.">Polish</button>
-      <button data-s="The quick brown fox jumps over the lazy dog.">English</button>
-      <button data-s="def tokenize(text: str) -> list[int]:
-    return [ord(c) for c in text]">Python</button>
-      <button data-s="😀🎉 ≥ 1234567">emoji + digits</button>
-    </div>
-    <div class="stats" id="stats"></div>
-    <div class="strip" id="strip"><span class="loading">loading vocab…</span></div>
-    <div class="legend"><span class="w">whole token (each token gets its own colour)</span><span class="f">byte fragment — not a complete UTF-8 character</span></div>
-  </section>
-
-  <div class="two">
-    <section class="panel">
-      <h2>Vocabulary by script <span id="vsize"></span></h2>
-      <div class="bars" id="bars"></div>
-      <p class="hint">Bar length is on a square-root scale so small categories stay visible; the numbers are exact. Click a row to browse that category. Script is assigned by Unicode range of the token's decoded text; "Han" includes kanji and hanja since they are unified.</p>
-    </section>
-    <section class="panel">
-      <h2>Han coverage</h2>
-      <div id="han" class="sub"></div>
-    </section>
-  </div>
-
-  <section>
-    <h2>Browse vocabulary</h2>
-    <div class="ctl">
-      <input type="search" id="q" placeholder="search token text, e.g. 天 or ing" aria-label="Search tokens">
-      <select id="catsel" aria-label="Category"><option value="-1">all categories</option></select>
-      <select id="sort" aria-label="Sort"><option value="rank">by merge rank</option><option value="len">by length (longest first)</option></select>
-    </div>
-    <div class="tbl"><table><thead><tr><th>rank</th><th>token</th><th>bytes</th><th>len</th><th>category</th></tr></thead><tbody id="rows"></tbody></table></div>
-    <div class="pager"><button id="prev">‹ prev</button><span id="pginfo"></span><button id="next">next ›</button></div>
-    <p class="hint">Click a token to see how BPE built it, merge by merge.</p>
-    <div id="tree" class="tree" hidden></div>
-  </section>
-  </div>
-
-  <footer>Byte Pair Lens · tokenizers run in your browser and match their reference encoders · <b>Built with Llama</b> · Vocabularies: OpenAI tiktoken (MIT); Qwen3, Mistral (Apache-2.0); Llama 3.1, Gemma 3 and DeepSeek-V3 under their own licences, with their use restrictions: see the <a href="licenses/NOTICE.txt">notice and licences</a>.</footer>
+  <footer><a href="licenses.html">Licenses</a><a href="https://github.com/EthanPany/byte-pair-lens">GitHub</a></footer>
 </div>
 
-<script src="bpe.js?v=eafacd255ddf"></script>
+<script src="bpe.js?v=95626c6d4dff"></script>
 <script src="hfimport.js"></script>
 <script src="logos.js"></script>
 <script src="bytemap.js?v=7bdd791e8f06"></script>
@@ -383,10 +381,48 @@ footer a{color:var(--fg);text-underline-offset:3px}
 (function(){
 const $=s=>document.querySelector(s);
 const TOKCOL=['t1','t2','t3','t4','t5'];
-const cache={}; let V=null, curEnc='cl100k_base';
+const cache={}; let V=null, curEnc='cl100k_base', booted=false, tokDirty=true;
 const encU=new TextEncoder();
 
 const hex=BPE.hex;
+function mb(n){return (n/1048576).toFixed(1)+' MB';}
+
+/* ---- Loading veil ----
+   The page blurs under a progress card while data downloads or a vocabulary is being built, so nothing
+   is ever shown half-ready. Several downloads share one bar. A failed load offers "Try again". */
+const Loader=(function(){
+  const jobs=new Map(); let showT=null, failed=false, holds=0;
+  const veil=$('#veil'), card=$('#veilcard');
+  function paint(){
+    if(failed)return;
+    const js=[...jobs.values()];
+    // a quiet job (a vocabulary loading behind an already drawn map) shows only while something waits on it
+    if(!holds&&!js.some(j=>!j.quiet)){clearTimeout(showT);showT=null;veil.dataset.on='0';return;} let got=0,total=0,prep=true;
+    for(const j of js){total+=j.total;got+=Math.min(j.got,j.total);if(!j.prep)prep=false;}
+    const local=js.length&&js.every(j=>j.local);
+    if(js.length)$('#veilwhat').textContent=(local?'Opening ':'Loading ')+(js.length===1?js[0].label:`${js.length} tokenizers`);
+    $('#veilfill').style.width=(js.length?(total?100*got/total:0):100).toFixed(1)+'%';
+    $('#veilhow').textContent=local?'Saved on this device':!js.length||prep?'Preparing…':total&&got?`${mb(got)} of ${mb(total)}`:'';
+    if(veil.dataset.on!=='1'&&!showT)showT=setTimeout(()=>{showT=null;if(holds||[...jobs.values()].some(j=>!j.quiet))veil.dataset.on='1';},150);
+  }
+  return {
+    start(id,label,total,quiet){const j=jobs.get(id)||{got:0};jobs.set(id,{...j,label,total:total||0,quiet:!!quiet});paint();},
+    update(id,got){const j=jobs.get(id);if(j){j.got=got;paint();}},
+    prep(id){const j=jobs.get(id);if(j){j.got=j.total;j.prep=true;paint();}},
+    local(id){const j=jobs.get(id);if(j){j.local=true;j.got=j.total;paint();}},
+    end(id){jobs.delete(id);paint();},
+    busy(){return jobs.size>0||holds>0;},
+    hold(){holds++;paint();},
+    release(){holds=Math.max(0,holds-1);paint();},
+    fail(msg,retry){
+      failed=true;jobs.clear();holds=0;card.classList.add('err');
+      $('#veilwhat').textContent='Could not load';$('#veilhow').textContent=msg;
+      const b=$('#veilretry');b.hidden=false;
+      b.onclick=()=>{failed=false;card.classList.remove('err');b.hidden=true;veil.dataset.on='0';retry();};
+      clearTimeout(showT);showT=null;veil.dataset.on='1';
+    },
+  };
+})();
 
 /* ---- Data loading ----
    manifest.json lists a content hash per data file (scripts/build_manifest.py). Files are fetched as
@@ -396,15 +432,19 @@ const hex=BPE.hex;
 const DATA_CACHE='bpl-data-v1';
 let manifestP=null;
 function manifest(){
-  if(!manifestP)manifestP=fetch('manifest.json',{cache:'no-cache'}).then(r=>r.ok?r.json():{files:{}}).catch(()=>({files:{}}));
+  if(!manifestP)manifestP=fetch('manifest.json',{cache:'no-cache'}).then(r=>{if(!r.ok)throw 0;return r.json();})
+    .then(m=>{try{localStorage.setItem('bpl-manifest',JSON.stringify(m));}catch(e){}return m;})
+    .catch(()=>{try{return JSON.parse(localStorage.getItem('bpl-manifest'))||{files:{}};}catch(e){return {files:{}};}}); // offline: the last manifest still matches the saved files
   return manifestP;
 }
 async function dataURL(name){const m=await manifest();const f=m.files[name];return f?`${name}?v=${f.v}`:name;}
 // fetch a data file, from Cache Storage when we have this version; onBytes(n) reports progress
-async function getData(name,onBytes){
+const CACHED=Symbol('cached'); // getData(..., true): the file is in Cache Storage, not parsed here
+async function getData(name,onBytes,ensureOnly){
   const url=await dataURL(name);
+  if(prefetching[url])await prefetching[url]; // already on its way in the background: wait for it instead of downloading twice
   let store=null;
-  try{store=await caches.open(DATA_CACHE);const hit=await store.match(url);if(hit){onBytes&&onBytes(Infinity);return hit.json();}}catch(e){store=null;}
+  try{store=await caches.open(DATA_CACHE);const hit=await store.match(url);if(hit){onBytes&&onBytes(Infinity);return ensureOnly?CACHED:hit.json();}}catch(e){store=null;}
   const r=await fetch(url); if(!r.ok)throw new Error(name+': HTTP '+r.status);
   let body;
   if(onBytes&&r.body){ // count decompressed bytes as they arrive
@@ -412,36 +452,153 @@ async function getData(name,onBytes){
     for(;;){const {done,value}=await reader.read(); if(done)break; parts.push(value); n+=value.length; onBytes(n);}
     body=new Blob(parts,{type:'application/json'});
   }else body=await r.blob();
+  let kept=false;
   if(store){
     try{
-      await store.put(url,new Response(body,{headers:{'Content-Type':'application/json'}}));
+      await store.put(url,new Response(body,{headers:{'Content-Type':'application/json'}})); kept=true;
       for(const k of await store.keys()){const u=new URL(k.url);if(u.pathname.endsWith('/'+name)&&!k.url.endsWith(url))store.delete(k);} // drop older versions
     }catch(e){}
   }
-  return JSON.parse(await body.text());
+  return ensureOnly&&kept?CACHED:JSON.parse(await body.text());
 }
-function mb(n){return (n/1048576).toFixed(1)+' MB';}
+// Tokenizers already saved on this device (Cache Storage). They open without a download.
+const saved=new Set();
+async function refreshSaved(){
+  try{
+    const m=await manifest(), store=await caches.open(DATA_CACHE);
+    const has=async f=>!m.files[f]||!!(await store.match(`${f}?v=${m.files[f].v}`)); // matched by full URL, so another copy of the site on the same host doesn't count
+    const found=new Set();
+    for(const o of $('#encsel').options){const e=o.value;if(m.files[e+'.json']&&await has(e+'.json')&&await has(e+'.merges.json'))found.add(e);}
+    saved.clear(); found.forEach(e=>saved.add(e));
+  }catch(e){}
+  if(navigator.storage&&navigator.storage.persist&&saved.size&&!/Firefox/.test(navigator.userAgent))navigator.storage.persist().catch(()=>{}); // ask the browser not to evict them
+}
+/* Background prefetch: once the page is showing, quietly save the other tokenizers to this device,
+   smallest first, one at a time, so later switches skip the download. It never blocks the page: it waits
+   while anything is loading in the foreground, and it does not run on metered or slow connections or
+   when storage is short. Only bytes are saved; a vocabulary is still built when it is first opened. */
+const prefetching={};
+async function prefetchOne(name){
+  const url=await dataURL(name), store=await caches.open(DATA_CACHE);
+  if(await store.match(url))return;
+  const job=(async()=>{
+    const r=await fetch(url,{priority:'low'}); if(!r.ok)throw new Error('HTTP '+r.status);
+    await store.put(url,r);
+    for(const k of await store.keys()){const u=new URL(k.url);if(u.pathname.endsWith('/'+name)&&!k.url.endsWith(url))store.delete(k);}
+  })();
+  prefetching[url]=job.catch(()=>{});
+  try{await job;}finally{delete prefetching[url];}
+}
+async function prefetchRest(){
+  try{
+    if(!('caches' in window))return;
+    const c=navigator.connection||{};
+    if(c.saveData||c.type==='cellular'||/(^|-)2g$/.test(c.effectiveType||''))return;
+    const m=await manifest(); await refreshSaved();
+    const size=f=>(m.files[f]||{}).size||0;
+    const todo=[...$('#encsel').options].map(o=>o.value).filter(e=>m.files[e+'.json']&&!saved.has(e))
+      .map(e=>({e,files:[e+'.json',e+'.merges.json'].filter(f=>m.files[f])}))
+      .map(t=>({...t,bytes:t.files.reduce((a,f)=>a+size(f),0)})).sort((a,b)=>a.bytes-b.bytes);
+    if(navigator.storage&&navigator.storage.estimate){
+      const {quota=0,usage=0}=await navigator.storage.estimate();
+      if(quota-usage<3*todo.reduce((a,t)=>a+t.bytes,0)+50e6)return; // keep well clear of the browser's limit
+    }
+    for(const f of ['coverage.json','freq.json'])if(m.files[f])await prefetchOne(f).catch(()=>{});
+    for(const t of todo){
+      while(Loader.busy()||document.hidden)await new Promise(r=>setTimeout(r,700));
+      if(saved.has(t.e))continue;
+      try{for(const f of t.files)await prefetchOne(f);saved.add(t.e);renderPickers();}catch(e){return;} // offline or blocked: stop quietly
+    }
+  }catch(e){}
+}
 // one in-flight promise per tokenizer, so the Tokenizer and Compare tabs never download twice
+/* Building a vocabulary (parsing megabytes of JSON, decoding every token) happens in a Web Worker: the
+   same bpe.js, loaded as a worker, reads the file from Cache Storage and sends back flat tables that
+   BPE.unpack() only has to index. Without workers or Cache Storage it is built here instead.
+   scripts/check_pack.cjs checks both routes give the same vocabulary. */
+const ready={}; // enc -> built vocabulary, once load(enc) has finished
+const bpeSrc=document.querySelector('script[src^="bpe.js"]').src;
+let worker=null, workerOff=!window.Worker, wid=0; const wjobs=new Map();
+function inWorker(msg){
+  return new Promise((res,rej)=>{
+    try{
+      if(!worker){
+        worker=new Worker(bpeSrc);
+        worker.onmessage=ev=>{const j=wjobs.get(ev.data.id);if(!j)return;wjobs.delete(ev.data.id);ev.data.error?j.rej(new Error(ev.data.error)):j.res(ev.data);};
+        worker.onerror=()=>{workerOff=true;for(const j of wjobs.values())j.rej(new Error('worker failed'));wjobs.clear();worker=null;};
+      }
+      const id=++wid; wjobs.set(id,{res,rej}); worker.postMessage({id,...msg});
+    }catch(e){workerOff=true;rej(e);}
+  });
+}
 function load(enc){
   if(!cache[enc])cache[enc]=loadNow(enc).catch(e=>{delete cache[enc];throw e;});
   return cache[enc];
 }
 async function loadNow(enc){
-  const label=[...$('#encsel').options].find(o=>o.value===enc)?.textContent.split(' · ')[0]||enc;
-  const m=await manifest();
-  const files=[enc+'.json'], sp=m.files[enc+'.merges.json']; if(sp)files.push(enc+'.merges.json');
-  const total=files.reduce((a,f)=>a+((m.files[f]||{}).size||0),0), got={};
-  const status=t=>{$('#loadstatus').textContent=t;};
-  const progress=()=>{const n=files.reduce((a,f)=>a+(got[f]===Infinity?((m.files[f]||{}).size||0):(got[f]||0)),0);status(`Loading ${label} vocabulary… ${total?mb(n)+' of '+mb(total):''}`);};
-  progress();
-  // vocabulary and merges download in parallel
-  const [j,merges]=await Promise.all(files.map(f=>getData(f,n=>{got[f]=n;progress();})));
-  status(`Preparing ${label}…`);
-  await new Promise(r=>setTimeout(r)); // let the status paint before the synchronous build
-  const v=BPE.load(j);
-  if(v.kind==='sp')v.setMerges(merges);
-  $('#loadstatus').textContent='';
-  return v;
+  const label=(SHORT[enc]||[([...$('#encsel').options].find(o=>o.value===enc)?.textContent||enc).split(' · ')[0]])[0];
+  Loader.start(enc,label,0,true);
+  try{
+    const m=await manifest();
+    const files=[enc+'.json'], sp=m.files[enc+'.merges.json']; if(sp)files.push(enc+'.merges.json');
+    const size=f=>(m.files[f]||{}).size||0, got={}, hit=new Set();
+    Loader.start(enc,label,files.reduce((a,f)=>a+size(f),0),true);
+    // vocabulary and merges download in parallel, straight into Cache Storage
+    const have=await Promise.all(files.map(f=>getData(f,n=>{if(n===Infinity){hit.add(f);if(hit.size===files.length)Loader.local(enc);}got[f]=Math.min(n,size(f)||n);Loader.update(enc,files.reduce((a,x)=>a+(got[x]||0),0));},true)));
+    Loader.prep(enc);
+    let v=null;
+    if(!workerOff&&have.every(x=>x===CACHED)){
+      try{
+        const abs=async f=>new URL(await dataURL(f),location.href).href;
+        const r=await inWorker({cacheName:DATA_CACHE,vocab:await abs(files[0]),merges:files[1]?await abs(files[1]):null});
+        v=BPE.unpack(r.P); if(r.merges)v.setMerges(r.merges);
+      }catch(e){v=null;}
+    }
+    if(!v){
+      const [j,merges]=await Promise.all(files.map((f,i)=>have[i]===CACHED?getData(f):have[i]));
+      await new Promise(r=>setTimeout(r,30)); // let the card paint before the synchronous build
+      v=BPE.load(j); if(v.kind==='sp')v.setMerges(merges);
+    }
+    if(v.kind==='sp')(window.requestIdleCallback||setTimeout)(()=>{void v.mergeRank;}); // index the merges when idle
+    saved.add(enc); ready[enc]=v;
+    return v;
+  }finally{Loader.end(enc);}
+}
+
+/* ---- Which characters are whole tokens ----
+   docs/whole.json (scripts/build_whole.cjs) lists, per shipped tokenizer, the code points that are one
+   whole token, and the assigned code points. The byte map draws from these bitmaps alone, so it is on
+   screen before a vocabulary is downloaded. A tokenizer that isn't in the file (your own upload, or the
+   file failed to load) gets its bitmap from the built vocabulary instead. */
+let WHOLE=null, ASSIGNED=null; const bitsCache={}, ovCache={};
+function expandRuns(r){const a=new Uint8Array(0x110000);for(let i=0;i<r.length;i+=2)a.fill(1,r[i],r[i]+r[i+1]);return a;}
+function assignedBits(){
+  if(ASSIGNED)return ASSIGNED;
+  if(WHOLE)return ASSIGNED=expandRuns(WHOLE.assigned);
+  ASSIGNED=new Uint8Array(0x110000);
+  for(let cp=0;cp<0x110000;cp++){if(cp>=0xD800&&cp<=0xDFFF)continue;if(!ByteMap.NONCHAR.test(String.fromCodePoint(cp)))ASSIGNED[cp]=1;}
+  return ASSIGNED;
+}
+function bitsFor(enc){
+  if(bitsCache[enc])return bitsCache[enc];
+  if(WHOLE&&WHOLE.whole[enc])return bitsCache[enc]=expandRuns(WHOLE.whole[enc]);
+  const v=ready[enc]; if(!v)return null;
+  const keys=ByteMap.vocabKeys(v), A=assignedBits(), b=new Uint8Array(0x110000);
+  for(let cp=0;cp<0x110000;cp++){if(!A[cp])continue;const u=encU.encode(String.fromCodePoint(cp));if(keys.has(BPE.key(u,0,u.length)))b[cp]=1;}
+  return bitsCache[enc]=b;
+}
+function overviewLite(enc){
+  if(ovCache[enc])return ovCache[enc];
+  const B=bitsFor(enc), A=assignedBits(), n=0x110000>>6, assigned=new Uint8Array(n), whole=new Uint8Array(n);
+  let totA=0, totW=0;
+  for(let g=0;g<n;g++){let a=0,w=0;for(let cp=g<<6,e=cp+64;cp<e;cp++){a+=A[cp];w+=B[cp];}assigned[g]=a;whole[g]=w;totA+=a;totW+=w;}
+  return ovCache[enc]={assigned,whole,totA,totW};
+}
+function blockLite(enc,blk){
+  const B=bitsFor(enc), A=assignedBits(), r0=blk.lo>>6, rows=(blk.hi>>6)-r0+1, state=new Uint8Array(rows*64); // 0 empty, 1 whole, 2 split
+  let assigned=0, whole=0;
+  for(let cp=blk.lo;cp<=blk.hi;cp++){if(!A[cp])continue;assigned++;whole+=B[cp];state[cp-(r0<<6)]=B[cp]?1:2;}
+  return {r0,rows,state,assigned,whole};
 }
 const encode=str=>V.encode(str);
 
@@ -474,7 +631,7 @@ function renderBars(){
   const counts=new Array(V.cats.length).fill(0); V.cat.forEach(c=>counts[c]++);
   const order=counts.map((n,i)=>i).sort((a,b)=>counts[b]-counts[a]);
   const max=counts[order[0]], total=V.cat.length;
-  $('#vsize').textContent='· '+total.toLocaleString()+' tokens';
+  $('#vsize').textContent=total.toLocaleString()+' tokens';
   $('#bars').innerHTML=order.map(i=>`<button class="bar" data-cat="${i}" aria-pressed="false"><span class="lab">${V.cats[i]}</span><span class="rail"><span class="fill" style="width:${(100*Math.sqrt(counts[i]/max)).toFixed(1)}%"></span></span><span class="n">${counts[i].toLocaleString()} · ${(100*counts[i]/total).toFixed(1)}%</span></button>`).join('');
   $('#bars').querySelectorAll('.bar').forEach(b=>b.onclick=()=>{$('#catsel').value=b.dataset.cat;page=0;renderTable();});
   const sel=$('#catsel'); sel.innerHTML='<option value="-1">all categories</option>'+order.map(i=>`<option value="${i}">${V.cats[i]}</option>`).join('');
@@ -484,21 +641,19 @@ function renderBars(){
   han.forEach(id=>{const t=V.text[id].trim();if(firstId===null)firstId=id;lens[[...t].length]=(lens[[...t].length]||0)+1;for(const ch of t){const o=ch.codePointAt(0);if((o>=0x3400&&o<=0x9FFF)||o>=0x20000)chars.add(ch)}});
   const common=[...'的一是不了在人有我他这个们中来上大为和国地到以说时要就出会可也你对生能而子那得于着下自之年过发后作里用道行所然家种事成方多经么去法学如都同现当没动面起看定天分还进好小部其些主样理心她本前开但因只从想实日军者意无力它与长把机十民第公此已工使情明性知全三又关点正业外将两高间由问很最重并物手应战向头文体政美相见被利什二等产或新己制身果加西斯月话合回特代内信表化老给世位次度门任常先海通教儿原东声提立及比员解水名真论处走义各入几口认条平系气题活尔更别打女变四神总何电数安少报才结反受目太量再感建务做接必场件计管期市直德资命山金指克许统区保至队形社便空决治展马科司五基眼书非则听白却界达光放强即像难且权思王象完设式色路记南品住告类求据程北边死张该交规万取拉格望觉术领共确传师观清今切院让识候带导争运笑飞风步改收根干造言联持组每济车亲极林服快办议往元英士证近失转夫令准布始怎呢存未远叫台单影具罗字爱击流备兵连调深商算质团集百需价花党华城石级整府离况亚请技际约示复病息究线似官火断精满支视消越器容照须九增研写称企八功吗包片史委乎查轻易早曾除农找装广显吧阿李标谈吃图念六引历首医局突专费号尽另周较注语仅考落青随选奇富答俄七买楼乐局紧'].slice(0,300);
   const covered=common.filter(c=>chars.has(c)).length;
-  $('#han').innerHTML=`<p><b class="num">${han.length.toLocaleString()}</b> Han tokens covering <b class="num">${chars.size.toLocaleString()}</b> distinct characters as whole tokens.</p>
-  <p>Of the 300 most frequent Chinese characters, <b class="num">${covered}</b> have their own token; the other ${300-covered} are split into byte fragments.</p>
-  <p>Token length in characters: ${Object.keys(lens).sort((a,b)=>a-b).map(k=>`<span style="font-family:var(--mono)">${k}→${lens[k]}</span>`).join(', ')}</p>
-  <p>First Han token is rank <span style="font-family:var(--mono)">#${firstId}</span> (${firstId!==null?V.text[firstId].trim():'–'}); the main Chinese block spans U+4E00–9FFF, 20,992 code points.</p>`;
+  $('#han').innerHTML=`<p><b class="num">${chars.size.toLocaleString()}</b> Han characters are whole tokens.</p><p><b class="num">${covered}</b> of the 300 most frequent Chinese characters have their own token.</p>`;
 }
 
 let page=0; const PAGE=50;
 function renderTable(){
+  if(!V)return;
   const q=$('#q').value, cat=+$('#catsel').value, sort=$('#sort').value;
   let ids=[];
   for(let i=0;i<V.cat.length;i++){if(cat>=0&&V.cat[i]!==cat)continue;if(q&&(V.text[i]===null||!V.text[i].includes(q)))continue;ids.push(i);}
   if(sort==='len')ids.sort((a,b)=>V.bytes[b].length-V.bytes[a].length);
   const pages=Math.max(1,Math.ceil(ids.length/PAGE)); page=Math.min(page,pages-1);
   const slice=ids.slice(page*PAGE,(page+1)*PAGE);
-  $('#rows').innerHTML=slice.map(i=>{const t=V.text[i];const shown=t===null?'<span class="inv">'+hex(V.bytes[i])+'</span>':t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'⏎').replace(/\t/g,'⇥').replace(/ /g,'␣');return `<tr data-id="${i}"><td>${i}</td><td class="txt">${shown}</td><td class="hex">${hex(V.bytes[i])}</td><td>${V.bytes[i].length}B${t!==null?' / '+[...t].length+'ch':''}</td><td class="cat">${V.cats[V.cat[i]]}</td></tr>`}).join('')||'<tr><td colspan="5" style="color:var(--muted)">no tokens match</td></tr>';
+  $('#rows').innerHTML=slice.map(i=>{const t=V.text[i];const shown=t===null?'<span class="inv">'+hex(V.bytes[i])+'</span>':t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'⏎').replace(/\t/g,'⇥').replace(/ /g,'␣');return `<tr data-id="${i}"><td class="num mono">${i}</td><td class="txt">${shown}</td><td class="hex">${hex(V.bytes[i])}</td><td>${V.bytes[i].length}B${t!==null?' / '+[...t].length+'ch':''}</td><td class="cat">${V.cats[V.cat[i]]}</td></tr>`}).join('')||'<tr><td colspan="5" style="color:var(--muted)">no tokens match</td></tr>';
   $('#pginfo').textContent=`${ids.length.toLocaleString()} tokens · page ${page+1}/${pages}`;
   $('#prev').disabled=page===0;$('#next').disabled=page>=pages-1;
   $('#bars').querySelectorAll('.bar').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.cat===cat)));
@@ -506,215 +661,240 @@ function renderTable(){
 
 /* ---- Byte map ----
    Row = every UTF-8 byte of a character except the last; column = the last byte (80–BF).
-   For multi-byte characters that is exactly cp>>6 (row) and cp&63 (column), for any length. */
-const BLOCK=ByteMap.BLOCK, vocabKeys=()=>ByteMap.vocabKeys(V), rowPrefix=ByteMap.rowPrefix, isTextToken=ByteMap.isTextToken, blockData=blk=>ByteMap.blockData(V,blk);
+   For multi-byte characters that is exactly cp>>6 (row) and cp&63 (column), for any length.
+   One cell size for both views, chosen so the 64 columns fill the width. */
+const BLOCK=ByteMap.BLOCK, vocabKeys=()=>ByteMap.vocabKeys(V), rowPrefix=ByteMap.rowPrefix, isTextToken=ByteMap.isTextToken;
 const U=cp=>'U+'+cp.toString(16).toUpperCase().padStart(4,'0');
-const BYTES=['','1 byte','2 bytes','3 bytes','4 bytes'];
+const encName=()=>(SHORT[curEnc]||[($('#encsel').selectedOptions[0]?.textContent||curEnc).split(' · ')[0]])[0];
+const pct=(w,a)=>{if(!a)return '–';const v=100*w/a;return (v>0&&v<1?v.toFixed(2):v.toFixed(1))+'%';};
 (function fillBlocks(){
-  const opt=(b,text)=>`<option value="${b.id}"${b.id==='han'?' selected':''}>${text}</option>`;
-  let h='<optgroup label="Overview"><option value="overview">All of Unicode, zoomed out (one cell = 64 characters)</option></optgroup>';
-  for(let n=1;n<=4;n++){
-    const f=ByteMap.FEATURED.filter(b=>b.bytes===n);
-    if(f.length)h+=`<optgroup label="Featured scripts · ${BYTES[n]} per character">`+f.map(b=>opt(b,`${b.name} — ${b.langs} · ${U(b.lo)}–${b.hi.toString(16).toUpperCase()}`)).join('')+'</optgroup>';
-  }
-  for(let n=1;n<=4;n++){
-    const all=ByteMap.ALL.filter(b=>b.bytes===n);
-    h+=`<optgroup label="All ${all.length} Unicode blocks · ${BYTES[n]} per character">`+all.map(b=>opt(b,`${b.name} · ${U(b.lo)}–${b.hi.toString(16).toUpperCase()}`)).join('')+'</optgroup>';
-  }
-  $('#blocksel').innerHTML=h;
+  const opt=b=>`<option value="${b.id}">${b.name}</option>`;
+  $('#blocksel').innerHTML='<option value="overview">All of Unicode</option>'+ByteMap.FEATURED.map(opt).join('')+ByteMap.ALL.map(opt).join('');
 })();
-let mapInfo=null, pinned=null;
+let mapInfo=null, pinned=null, hlBlock=null, lastCp=null;
+const LABELW=64, GAP=1;
 function cssVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+function cellSize(block){const w=$('#mapscroll').clientWidth-(block?16:0);return Math.max(13,Math.min(22,Math.floor((w-LABELW-2)/64)-GAP));}
 function sizeCanvas(W,H){
   const cv=$('#map');
   const dpr=Math.min(window.devicePixelRatio||1, Math.sqrt(16e6/(W*H))); // Safari caps canvas area near 16 Mpx
   cv.width=Math.floor(W*dpr); cv.height=Math.floor(H*dpr); cv.style.width=W+'px'; cv.style.height=H+'px';
   const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr); return ctx;
 }
+// characters with nothing to draw: say what they are instead of showing a missing-glyph box
+const KIND=ch=>/^\p{Cc}$/u.test(ch)?'control character':/^\p{Cf}$/u.test(ch)?'format character':/^[\p{Zs}\p{Zl}\p{Zp}]$/u.test(ch)?'space':null;
+const MARK=/^\p{M}$/u;
 
 /* Overview: one cell per 64-code-point group (one row of the detailed map).
    Overview row = every UTF-8 byte except the last two (cp>>12); column = the second-to-last byte. */
 function overviewRows(O){
-  const rows=[{kind:'row',label:'1–2 B',groups:[...Array(32).keys()].map(g=>({g,col:g}))}];
-  rows.push({kind:'sep',label:'3 bytes per character · row = lead byte, column = 2nd byte'});
+  const rows=[{kind:'sep',label:'1–2 bytes'},{kind:'row',label:'',groups:[...Array(32).keys()].map(g=>({g,col:g}))}];
+  rows.push({kind:'sep',label:'3 bytes'});
   for(let R=0;R<16;R++)rows.push({kind:'row',label:'E'+R.toString(16).toUpperCase(),groups:[...Array(64).keys()].map(c=>({g:(R<<6)|c,col:c})).filter(x=>x.g>=32)});
-  rows.push({kind:'sep',label:'4 bytes per character · row = first two bytes, column = 3rd byte'});
-  let gap=null;
+  rows.push({kind:'sep',label:'4 bytes'});
+  let gap=false;
   for(let R=0x10;R<0x110;R++){
     const groups=[...Array(64).keys()].map(c=>({g:(R<<6)|c,col:c}));
-    if(!groups.some(x=>O.assigned[x.g])){gap=gap||[R,R];gap[1]=R;continue;}
-    if(gap){rows.push({kind:'gap',label:`⋯ ${U(gap[0]<<12)}–${U(((gap[1]+1)<<12)-1)}: no characters to tokenize (unassigned or private use)`});gap=null;}
+    if(!groups.some(x=>O.assigned[x.g])){gap=true;continue;}
+    if(gap){rows.push({kind:'gap'});gap=false;}
     const b=encU.encode(String.fromCodePoint(R<<12));
     rows.push({kind:'row',label:hex(b.subarray(0,2)),groups});
   }
-  if(gap)rows.push({kind:'gap',label:`⋯ ${U(gap[0]<<12)}–${U(((gap[1]+1)<<12)-1)}: no characters to tokenize (unassigned or private use)`});
   return rows;
 }
 function drawOverview(){
-  const O=ByteMap.overviewData(V), rows=overviewRows(O);
-  const cell=Math.max(10,+$('#cellsel').value), gap=1, labelW=78, headH=16, sepH=22;
-  let H=headH; rows.forEach(r=>{r.y=H;H+=r.kind==='row'?cell+gap:sepH;});
-  const W=labelW+64*(cell+gap), ctx=sizeCanvas(W,H);
-  const cFg=cssVar('--fg'), cLine=cssVar('--line'), cMuted=cssVar('--muted'), cBg=cssVar('--bg'), cAcc=cssVar('--whole'), cFrag=cssVar('--frag'), mono=cssVar('--mono');
+  const O=overviewLite(curEnc), rows=overviewRows(O);
+  const cell=cellSize(false), sepH=26, gapH=14;
+  let H=0; rows.forEach(r=>{r.y=H;H+=r.kind==='row'?cell+GAP:r.kind==='sep'?sepH:gapH;}); H+=2;
+  const W=LABELW+64*(cell+GAP)+1, ctx=sizeCanvas(W,H);
+  const cFg=cssVar('--fg'), cLine=cssVar('--line'), cMuted=cssVar('--muted'), cBg=cssVar('--bg'), cAcc=cssVar('--whole'), cSplit=cssVar('--split'), mono=cssVar('--mono'), sans=cssVar('--sans');
   ctx.fillStyle=cBg; ctx.fillRect(0,0,W,H); ctx.textBaseline='middle';
-  ctx.font=`9px ${mono}`; ctx.fillStyle=cMuted;
-  for(let c=0;c<64;c+=4)ctx.fillText((0x80+c).toString(16).toUpperCase(),labelW+c*(cell+gap),headH/2);
-  for(const r of rows){
-    if(r.kind!=='row'){ctx.font=`10px ${mono}`;ctx.fillStyle=cMuted;ctx.fillText(r.label,2,r.y+sepH/2+2);continue;}
-    ctx.font=`${Math.min(10,cell-1)}px ${mono}`; ctx.fillStyle=cMuted; ctx.fillText(r.label,2,r.y+cell/2);
+  const pos=new Map(); // group -> [x, y, row index, column]
+  rows.forEach((r,ri)=>{
+    if(r.kind==='sep'){ctx.font=`600 11px ${sans}`;ctx.fillStyle=cFg;ctx.fillText(r.label,0,r.y+sepH/2+3);return;}
+    if(r.kind==='gap'){ctx.font=`11px ${sans}`;ctx.fillStyle=cMuted;ctx.fillText('⋯',LABELW,r.y+gapH/2);return;}
+    ctx.font=`10px ${mono}`; ctx.fillStyle=cMuted; ctx.fillText(r.label,0,r.y+cell/2+1);
     for(const {g,col} of r.groups){
-      const x=labelW+col*(cell+gap), a=O.assigned[g];
+      const x=LABELW+col*(cell+GAP), a=O.assigned[g]; pos.set(g,[x,r.y,ri,col]);
       if(!a){ctx.strokeStyle=cLine;ctx.setLineDash([2,2]);ctx.strokeRect(x+.5,r.y+.5,cell-1,cell-1);ctx.setLineDash([]);continue;}
-      ctx.fillStyle=cLine; ctx.fillRect(x,r.y,cell,cell);
+      ctx.fillStyle=cSplit; ctx.fillRect(x,r.y,cell,cell);
       const f=O.whole[g]/a;
-      if(f>0){ctx.globalAlpha=0.2+0.8*f;ctx.fillStyle=cAcc;ctx.fillRect(x,r.y,cell,cell);ctx.globalAlpha=1;}
-      if(O.frag[g]){ctx.fillStyle=cFrag;ctx.fillRect(x,r.y+cell-3,cell,3);}
+      if(f>0){ctx.globalAlpha=0.22+0.78*f;ctx.fillStyle=cAcc;ctx.fillRect(x,r.y,cell,cell);ctx.globalAlpha=1;}
+    }
+  });
+  // name the scripts on the map itself: an outline per featured script, a label where it fits
+  const taken=[]; // label spans already used in the band above the first row
+  for(const b of [...ByteMap.FEATURED].sort((p,q)=>(q.hi-q.lo)-(p.hi-p.lo))){
+    const cells=[]; for(let g=b.lo>>6;g<=b.hi>>6;g++){const p=pos.get(g);if(p)cells.push(p);}
+    if(!cells.length)continue;
+    const inSet=new Set(cells.map(c=>c[2]*64+c[3]));
+    ctx.strokeStyle=cFg; ctx.lineWidth=hlBlock===b.id?3:1; ctx.beginPath();
+    for(const [x,y,ri,col] of cells){
+      const x0=x-.5,y0=y-.5,x1=x+cell+.5,y1=y+cell+.5;
+      if(col===0||!inSet.has(ri*64+col-1)){ctx.moveTo(x0,y0);ctx.lineTo(x0,y1);}
+      if(col===63||!inSet.has(ri*64+col+1)){ctx.moveTo(x1,y0);ctx.lineTo(x1,y1);}
+      if(!inSet.has((ri-1)*64+col)){ctx.moveTo(x0,y0);ctx.lineTo(x1,y0);}
+      if(!inSet.has((ri+1)*64+col)){ctx.moveTo(x0,y1);ctx.lineTo(x1,y1);}
+    }
+    ctx.stroke(); ctx.lineWidth=1;
+    const name=SHORTB[b.id]||b.name; ctx.font=`600 11px ${sans}`; const tw=ctx.measureText(name).width;
+    const xs=cells.map(c=>c[0]), ys=cells.map(c=>c[1]);
+    const bx0=Math.min(...xs), bx1=Math.max(...xs)+cell, by0=Math.min(...ys), by1=Math.max(...ys)+cell;
+    if(by0===rows[1].y){ // the first row: labels sit in the band above it
+      const cx=(bx0+bx1)/2, l=cx-tw/2-3, r=cx+tw/2+3;
+      if(!taken.some(([a,z])=>l<z&&r>a)){taken.push([l,r]);ctx.fillStyle=cFg;ctx.textAlign='center';ctx.fillText(name,cx,rows[0].y+sepH/2+3);ctx.textAlign='left';}
+    }else if(cells.length>=12&&bx1-bx0>=tw+16){
+      const cx=(bx0+bx1)/2, cy=(by0+by1)/2;
+      ctx.fillStyle=cBg; ctx.fillRect(cx-tw/2-7,cy-10,tw+14,20); ctx.strokeStyle=cFg; ctx.strokeRect(cx-tw/2-6.5,cy-9.5,tw+13,19);
+      ctx.fillStyle=cFg; ctx.textAlign='center'; ctx.fillText(name,cx,cy+1); ctx.textAlign='left';
     }
   }
-  // stats: whole of Unicode, and by UTF-8 length
   const by=[0,0,0,0,0].map(()=>[0,0]);
   for(let g=0;g<O.assigned.length;g++){if(!O.assigned[g])continue;const n=ByteMap.utf8Len(g<<6);by[n][0]+=O.assigned[g];by[n][1]+=O.whole[g];}
-  const pct=(w,a)=>{if(!a)return '–';const v=100*w/a;return (v>0&&v<1?v.toFixed(2):v.toFixed(1))+'%';};
-  $('#mapstats').innerHTML=`<span><b>${O.totW.toLocaleString()}</b> / ${O.totA.toLocaleString()} characters in Unicode are whole tokens (${pct(O.totW,O.totA)})</span>`+[1,2,3,4].map(n=>`<span>${BYTES[n]}: <b>${pct(by[n][1],by[n][0])}</b></span>`).join('');
-  const note=$('#mapnote'); note.hidden=false;
-  note.textContent='Each cell is one row of the detailed map: 64 characters that share every UTF-8 byte except the last. Darker blue = more of those 64 characters are whole tokens. A vermilion underline means the shared prefix is itself a fragment token. Click a cell to open its Unicode block.';
-  $('#maplegend').hidden=true;
-  mapInfo={overview:true,rows,cell,gap,labelW,O};
+  $('#mapstats').innerHTML=`<span class="big">${pct(O.totW,O.totA)}</span><span class="say">of Unicode is one whole token in <b>${esc(encName())}</b></span><span class="more">${O.totW.toLocaleString()} of ${O.totA.toLocaleString()} characters`+[1,2,3,4].map(n=>` · ${n} byte${n>1?'s':''} <b>${pct(by[n][1],by[n][0])}</b>`).join('')+'</span>';
+  mapInfo={overview:true,rows,cell,O};
 }
 function overviewCell(ev){
-  const {rows,cell,gap,labelW}=mapInfo; const rc=$('#map').getBoundingClientRect(); const x=ev.clientX-rc.left-labelW, y=ev.clientY-rc.top;
-  if(x<0)return null; const col=Math.floor(x/(cell+gap));
-  const r=rows.find(r=>r.kind==='row'&&y>=r.y&&y<r.y+cell); if(!r)return null;
+  const {rows,cell}=mapInfo; const rc=$('#map').getBoundingClientRect(); const x=ev.clientX-rc.left-LABELW, y=ev.clientY-rc.top;
+  if(x<0)return null; const col=Math.floor(x/(cell+GAP));
+  const r=rows.find(r=>r.kind==='row'&&y>=r.y&&y<r.y+cell+GAP); if(!r)return null;
   const hit=r.groups.find(q=>q.col===col); return hit&&mapInfo.O.assigned[hit.g]?hit.g:null;
 }
-function showGroup(g){
-  const O=mapInfo.O, lo=g<<6, hi=lo+63, blk=ByteMap.blockOf(lo), pre=rowPrefix(lo);
-  const sample=[];for(let cp=lo;cp<=hi&&sample.length<8;cp++){const ch=String.fromCodePoint(cp);if(!ByteMap.NONCHAR.test(ch))sample.push(ch);}
-  $('#detail').innerHTML=`<div class="big" style="font-size:2rem;letter-spacing:.1em">${sample.join('')}</div><dl><dt>range</dt><dd>${U(lo)}–${hi.toString(16).toUpperCase()}</dd><dt>block</dt><dd>${blk?blk.name:'–'}</dd><dt>bytes</dt><dd>${ByteMap.utf8Len(lo)} per character</dd>${pre.length?`<dt>shared prefix</dt><dd>${hex(pre)} ${O.frag[g]?'<span class="inv">is a fragment token</span>':pre.length>=2?'is not a token':''}</dd>`:''}<dt>whole tokens</dt><dd>${O.whole[g]} / ${O.assigned[g]} characters</dd></dl><p class="sub" style="font-family:var(--sans)">Click to open ${blk?blk.name:'this block'}.</p>`;
+/* The detail card follows the pointer; a click on a character pins it. */
+function placeCard(ev){
+  const d=$('#detail'); d.hidden=false;
+  const w=d.offsetWidth, h=d.offsetHeight; let x, y;
+  if(ev){x=ev.clientX+18; y=ev.clientY+18; if(x+w>innerWidth-8)x=ev.clientX-w-18; if(y+h>innerHeight-8)y=innerHeight-h-8;}
+  else{const r=$('#mapscroll').getBoundingClientRect(); x=r.right-w-24; y=r.top+16;}
+  d.style.left=Math.max(8,x)+'px'; d.style.top=Math.max(8,y)+'px';
 }
-let ovReturn=null; // where the overview was scrolled when we zoomed in, for "back"
+function hideCard(){if(pinned===null)$('#detail').hidden=true;}
+function unpin(){pinned=null;$('#detail').classList.remove('pinned');$('#detail').hidden=true;if(V)writeHash();}
+function showGroup(g){
+  const O=mapInfo.O, lo=g<<6, hi=lo+63, blk=ByteMap.blockOf(lo);
+  const sample=[];for(let cp=lo;cp<=hi&&sample.length<8;cp++){const ch=String.fromCodePoint(cp);if(!ByteMap.NONCHAR.test(ch)&&!KIND(ch))sample.push((MARK.test(ch)?'◌':'')+ch);}
+  $('#detail').innerHTML=`<div class="big sm">${esc(sample.join(''))}</div><dl><dt>Block</dt><dd class="plain">${blk?blk.name:'–'}</dd><dt>Range</dt><dd>${U(lo)}–${hi.toString(16).toUpperCase()}</dd><dt>Whole tokens</dt><dd>${O.whole[g]} of ${O.assigned[g]}</dd></dl><div class="foot">Click to zoom in</div>`;
+}
 function openGroup(g){
   const blk=ByteMap.blockOf(g<<6); if(!blk)return;
-  ovReturn={map:$('#mapscroll').scrollTop,page:window.scrollY};
   setBlock(blk.id);
-  const {cell,gap,headH}=mapInfo; $('#mapscroll').scrollTop=headH+((g-(blk.lo>>6))*(cell+gap))-40;
+  const {cell,headH}=mapInfo; $('#mapscroll').scrollTop=headH+((g-(blk.lo>>6))*(cell+GAP))-40;
 }
 function setBlock(id){
-  $('#blocksel').value=id; pinned=null;
-  $('#detail').innerHTML='<p class="sub">Hover or tap a cell.</p>';
+  $('#blocksel').value=id; pinned=null; $('#detail').classList.remove('pinned'); $('#detail').hidden=true; $('#mapscroll').scrollTop=0;
   drawMap(); writeHash();
-}
-function backToOverview(){
-  const r=ovReturn; setBlock('overview');
-  if(r){$('#mapscroll').scrollTop=r.map;window.scrollTo({top:r.page});}
 }
 const SHORTB={ascii:'ASCII',latin:'Latin',greek:'Greek',cyrillic:'Cyrillic',hebrew:'Hebrew',arabic:'Arabic',devanagari:'Devanagari',bengali:'Bengali',thai:'Thai',kana:'Kana',hangul:'Hangul',han:'Han',hanA:'Han Ext A',emoji:'Emoji',hanB:'Han Ext B'};
 (function buildMapNav(){
-  let h='<button data-b="overview" title="Every character in Unicode, one cell per 64">All of Unicode</button>';
-  for(let n=1;n<=4;n++){
-    const f=ByteMap.FEATURED.filter(b=>b.bytes===n); if(!f.length)continue;
-    h+=`<span class="glab">${n} byte${n>1?'s':''}</span>`+f.map(b=>`<button data-b="${b.id}" title="${b.name} — ${b.langs}">${SHORTB[b.id]||b.name}</button>`).join('');
-  }
-  $('#scriptchips').innerHTML=h;
-  const opts=[...ByteMap.FEATURED.map(b=>[b.id,`${b.name} — ${b.langs}`]),...ByteMap.ALL.map(b=>[b.id,`${b.name} · ${U(b.lo)}–${b.hi.toString(16).toUpperCase()}`])];
+  $('#scriptchips').innerHTML='<button data-b="overview">All of Unicode</button>'+ByteMap.FEATURED.map(b=>`<button data-b="${b.id}" title="${b.name}: ${b.langs}">${SHORTB[b.id]||b.name}</button>`).join('');
+  const opts=[...ByteMap.FEATURED.map(b=>[b.id,b.name]),...ByteMap.ALL.map(b=>[b.id,`${b.name} · ${U(b.lo)}–${b.hi.toString(16).toUpperCase()}`])];
   $('#blocklist').innerHTML=opts.map(([,t])=>`<option value="${t.replace(/"/g,'&quot;')}"></option>`).join('');
   const byText=new Map(opts.map(([id,t])=>[t,id]));
-  $('#blocksearch').addEventListener('change',e=>{const id=byText.get(e.target.value);if(id){ovReturn=null;setBlock(id);e.target.value='';e.target.blur();}});
-  $('#blocksearch').addEventListener('input',e=>{const id=byText.get(e.target.value);if(id){ovReturn=null;setBlock(id);e.target.value='';}});
+  const jump=e=>{const id=byText.get(e.target.value);if(id){setBlock(id);e.target.value='';e.target.blur();}};
+  $('#blocksearch').addEventListener('change',jump); $('#blocksearch').addEventListener('input',jump);
 })();
 function updateMapNav(){
   const id=$('#blocksel').value, blk=BLOCK[id], ov=id==='overview';
-  $('#backov').hidden=ov;
-  if(ov)$('#crumbs').innerHTML='<span class="here">All of Unicode</span> <span class="rng">· one cell = 64 characters · click a cell to zoom in</span>';
-  else $('#crumbs').innerHTML=`<span>${BYTES[blk.bytes]} per character</span><span class="sepch">›</span><span class="here">${blk.name}</span> <span class="rng">${U(blk.lo)}–${blk.hi.toString(16).toUpperCase()}</span>`;
-  $('#scriptchips').querySelectorAll('button').forEach(b=>{const f=BLOCK[b.dataset.b];b.setAttribute('aria-pressed',String(b.dataset.b===id||(!!f&&!!blk&&f.lo===blk.lo&&!ByteMap.FEATURED.includes(blk))));});
-  $('#cellseg').querySelectorAll('button').forEach(b=>b.setAttribute('aria-checked',String(b.dataset.v===$('#cellsel').value)));
+  $('#mapscroll').className='mapscroll '+(ov?'over':'block');
+  $('#scriptchips').querySelectorAll('button').forEach(b=>{const f=BLOCK[b.dataset.b];b.setAttribute('aria-pressed',String(b.dataset.b===id||(!!f&&!!blk&&f.lo===blk.lo&&f.hi===blk.hi)));});
+  $('#maptip').textContent=ov?'One square is 64 characters. Click to zoom in.':'One square is one character. Click to pin it.';
 }
-$('#scriptchips').addEventListener('click',e=>{const b=e.target.closest('button[data-b]');if(!b)return;if(b.dataset.b==='overview')backToOverview();else{ovReturn=null;setBlock(b.dataset.b);}});
-$('#backov').onclick=backToOverview;
-$('#cellseg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;$('#cellsel').value=b.dataset.v;drawMap();});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#pane-map').hidden&&$('#blocksel').value!=='overview'&&document.activeElement!==$('#blocksearch'))backToOverview();});
+$('#scriptchips').addEventListener('click',e=>{const b=e.target.closest('button[data-b]');if(b)setBlock(b.dataset.b);});
+// pointing at a script chip shows where that script lives on the overview
+function highlight(id){if(id===hlBlock)return;hlBlock=id;if(mapInfo&&mapInfo.overview&&!$('#pane-map').hidden)drawOverview();}
+$('#scriptchips').addEventListener('mouseover',e=>{const b=e.target.closest('button[data-b]');highlight(b&&b.dataset.b!=='overview'?b.dataset.b:null);});
+$('#scriptchips').addEventListener('mouseleave',()=>highlight(null));
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape'||$('#pane-map').hidden||document.activeElement===$('#blocksearch'))return;
+  if(pinned!==null)unpin(); else if($('#blocksel').value!=='overview')setBlock('overview');
+});
 
 function drawMap(){
-  if(!V||$('#pane-map').hidden)return;
+  if($('#pane-map').hidden||!bitsFor(curEnc))return;
   updateMapNav();
   if($('#blocksel').value==='overview'){drawOverview();return;}
-  $('#maplegend').hidden=false;
-  const blk=BLOCK[$('#blocksel').value]; const D=blockData(blk);
-  const cell=+$('#cellsel').value, gap=1, labelW=78, headH=16;
-  const W=labelW+64*(cell+gap), H=headH+D.rows*(cell+gap), ctx=sizeCanvas(W,H);
-  const cFg=cssVar('--fg'), cLine=cssVar('--line'), cMuted=cssVar('--muted'), cBg=cssVar('--bg'), cAcc=cssVar('--whole'), cFrag=cssVar('--frag'), mono=cssVar('--mono');
-  ctx.fillStyle=cBg; ctx.fillRect(0,0,W,H);
-  ctx.font=`${Math.min(10,cell)}px ${mono}`; ctx.fillStyle=cMuted; ctx.textBaseline='middle';
+  const blk=BLOCK[$('#blocksel').value]; const D=blockLite(curEnc,blk);
+  const cell=cellSize(true), headH=18;
+  const W=LABELW+64*(cell+GAP)+1, H=headH+D.rows*(cell+GAP)+1, ctx=sizeCanvas(W,H);
+  const cFg=cssVar('--fg'), cLine=cssVar('--line'), cMuted=cssVar('--muted'), cBg=cssVar('--bg'), cAcc=cssVar('--whole'), cSplit=cssVar('--split'), mono=cssVar('--mono'), sans=cssVar('--sans');
+  ctx.fillStyle=cBg; ctx.fillRect(0,0,W,H); ctx.textBaseline='middle';
   const multi=blk.lo>=0x80;
-  if(cell>=14)for(let c=0;c<64;c++){ctx.fillText((multi?0x80+c:c).toString(16).toUpperCase().padStart(2,'0'),labelW+c*(cell+gap)+1,headH/2);}
+  ctx.font=`9px ${mono}`; ctx.fillStyle=cMuted;
+  for(let c=0;c<64;c+=cell>=16?1:4)ctx.fillText((multi?0x80+c:c).toString(16).toUpperCase().padStart(2,'0'),LABELW+c*(cell+GAP)+2,headH/2);
+  for(let r=0;r<D.rows;r++)ctx.fillText(multi?hex(rowPrefix((D.r0+r)<<6)):U((D.r0+r)<<6),0,headH+r*(cell+GAP)+cell/2+1);
   for(let r=0;r<D.rows;r++){
-    const y=headH+r*(cell+gap), pre=rowPrefix((D.r0+r)<<6);
-    ctx.font=`${Math.min(10,Math.max(8,cell-2))}px ${mono}`;
-    ctx.fillStyle=D.fragRow[r]?cFrag:cMuted; ctx.fillText(multi?hex(pre):'U+'+((D.r0+r)<<6).toString(16).toUpperCase().padStart(4,'0'),2,y+cell/2);
-    if(D.fragRow[r]){ctx.fillStyle=cFrag;ctx.fillRect(labelW-6,y,3,cell);}
+    const y=headH+r*(cell+GAP);
     for(let c=0;c<64;c++){
-      const i=r*64+c, st=D.state[i], x=labelW+c*(cell+gap);
+      const st=D.state[r*64+c], x=LABELW+c*(cell+GAP);
       if(!st){ctx.strokeStyle=cLine;ctx.setLineDash([2,2]);ctx.strokeRect(x+.5,y+.5,cell-1,cell-1);ctx.setLineDash([]);continue;}
-      ctx.fillStyle=st===1?cAcc:cLine; ctx.fillRect(x,y,cell,cell);
-      if(cell>=22){const cp=((D.r0+r)<<6)|c;ctx.fillStyle=st===1?cBg:cFg;ctx.font=`${cell-7}px ${cssVar('--cjk')}`;ctx.textAlign='center';ctx.fillText(String.fromCodePoint(cp),x+cell/2,y+cell/2+1);ctx.textAlign='left';}
+      ctx.fillStyle=st===1?cAcc:cSplit; ctx.fillRect(x,y,cell,cell);
     }
   }
-  const pct=D.assigned?(100*D.whole/D.assigned).toFixed(1):'0';
-  $('#mapstats').innerHTML=`<span><b>${D.whole.toLocaleString()}</b> / ${D.assigned.toLocaleString()} assigned characters are whole tokens (${pct}%)</span><span><b>${(D.tok/Math.max(1,D.assigned)).toFixed(2)}</b> tokens per character on average</span>`+(D.prefixable?`<span><b>${D.prefixRows}</b> / ${D.prefixable} row prefixes are fragment tokens</span>`:'');
-  const note=$('#mapnote');
-  if(V.kind==='sp'){note.hidden=false;note.textContent=`${V.label||V.name} uses byte fallback: a character that isn't in the vocabulary becomes one <0xNN> token per byte. Its vocabulary has no multi-byte fragment tokens, so no row is marked.`;}
-  else if(!multi){note.hidden=false;note.textContent='ASCII characters are one byte each, so every one of them is in a byte-level vocabulary.';}
-  else note.hidden=true;
-  mapInfo={blk,D,cell,gap,labelW,headH};
+  ctx.font=`${cell-6}px ${sans}`; ctx.textAlign='center';
+  for(let r=0;r<D.rows;r++){
+    const y=headH+r*(cell+GAP);
+    for(let c=0;c<64;c++){
+      const st=D.state[r*64+c]; if(!st)continue;
+      const ch=String.fromCodePoint(((D.r0+r)<<6)|c); if(KIND(ch))continue;
+      ctx.fillStyle=st===1?cBg:cFg; ctx.fillText(MARK.test(ch)?'◌'+ch:ch,LABELW+c*(cell+GAP)+cell/2,y+cell/2+1,cell);
+    }
+  }
+  ctx.textAlign='left';
+  $('#mapstats').innerHTML=`<span class="big">${pct(D.whole,D.assigned)}</span><span class="say">of <b>${blk.name}</b> is one whole token in <b>${esc(encName())}</b></span><span class="more">${D.whole.toLocaleString()} of ${D.assigned.toLocaleString()} characters · ${U(blk.lo)}–${blk.hi.toString(16).toUpperCase()}</span>`;
+  mapInfo={blk,D,cell,headH};
 }
 function cellAt(ev){
-  if(!mapInfo||mapInfo.overview)return null; const {D,cell,gap,labelW,headH,blk}=mapInfo;
-  const r=$('#map').getBoundingClientRect(); const x=ev.clientX-r.left-labelW, y=ev.clientY-r.top-headH;
-  if(x<0||y<0)return null; const c=Math.floor(x/(cell+gap)), row=Math.floor(y/(cell+gap));
+  if(!mapInfo||mapInfo.overview)return null; const {D,cell,headH}=mapInfo;
+  const r=$('#map').getBoundingClientRect(); const x=ev.clientX-r.left-LABELW, y=ev.clientY-r.top-headH;
+  if(x<0||y<0)return null; const c=Math.floor(x/(cell+GAP)), row=Math.floor(y/(cell+GAP));
   if(c<0||c>63||row<0||row>=D.rows||!D.state[row*64+c])return null; return ((D.r0+row)<<6)|c;
 }
-function utf16(cp){const s=String.fromCodePoint(cp);return Array.from({length:s.length},(_,i)=>s.charCodeAt(i).toString(16).toUpperCase().padStart(4,'0')).join(' ');}
-function leadRange(b){ // which code points share this lead byte
-  // the lowest code points of each length use fewer bytes, so E0 starts at U+0800 and F0 at U+10000
-  if(b>=0xF0){const lo=(b&7)<<18;return [Math.max(lo,0x10000),lo+0x3FFFF];}
-  if(b>=0xE0){const lo=(b&15)<<12;return [Math.max(lo,0x800),lo+0xFFF];}
-  const lo=(b&31)<<6;return [Math.max(lo,0x80),lo+63];
-}
 function showDetail(cp){
-  const ch=String.fromCodePoint(cp), b=encU.encode(ch);
+  const ch=String.fromCodePoint(cp), b=encU.encode(ch); lastCp=cp;
+  if(!V){ // the vocabulary is still on its way: say what the bitmap knows, the pieces follow
+    const w=bitsFor(curEnc)[cp], k=KIND(ch);
+    $('#detail').innerHTML=(k?`<div class="big kind">${k}</div>`:`<div class="big">${MARK.test(ch)?'◌':''}${esc(ch)}</div>`)+`<dl><dt>Code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)}</dd><dt>Tokens</dt><dd class="plain">${w?'1, whole':'<span class="inv">split</span>'}</dd><dt>Pieces</dt><dd class="plain">…</dd></dl>`;
+    $('#detail').classList.toggle('pinned',pinned!==null); return;
+  }
   const ids=V.splitChar(ch), whole=ids.length===1&&V.bytes[ids[0]].length===b.length;
-  const split=ids.map(id=>{const t=V.text[id];return `<span class="${t===null?'frag':''}">${t===null?hex(V.bytes[id]):t}<small style="opacity:.7"> #${id}</small></span>`}).join('');
+  const split=ids.map(id=>{const t=V.text[id];return `<span class="${t===null?'frag':''}">${t===null?hex(V.bytes[id]):esc(t)}</span>`}).join('');
   const pre=b.subarray(0,b.length-1), pk=BPE.key(pre,0,pre.length);
-  let prefixLine='';
-  if(pre.length>=2)prefixLine=`<dt>prefix</dt><dd>${hex(pre)} ${vocabKeys().has(pk)&&!isTextToken(pk)?'is a fragment token':'is not a token'}</dd>`;
-  let leadNote='';
-  const first=V.bytes[ids[0]];
-  if(!whole&&first.length===1&&first[0]>=0xC0){const [lo,hi]=leadRange(first[0]);leadNote=`<p class="sub" style="font-family:var(--sans)">The first token is the bare lead byte <b>${hex(first)}</b>, which every character from U+${lo.toString(16).toUpperCase().padStart(4,'0')} to U+${hi.toString(16).toUpperCase()} starts with, so it doesn't tell the model which script this is.</p>`;}
-  $('#detail').innerHTML=`<div class="big">${ch}</div><dl><dt>code point</dt><dd>U+${cp.toString(16).toUpperCase().padStart(4,'0')}</dd><dt>UTF-8</dt><dd>${hex(b)} (${b.length} byte${b.length>1?'s':''})</dd><dt>UTF-16</dt><dd>${utf16(cp)}</dd><dt>status</dt><dd>${whole?'whole token':'<span class="inv">split into '+ids.length+' tokens</span>'}</dd><dt>encoding</dt><dd class="split">${split}</dd>${prefixLine}</dl>${leadNote}${pinned!==null?'<p class="sub" style="font-family:var(--sans)">pinned · click again to unpin</p>':''}`;
+  const prefixLine=pre.length>=2&&vocabKeys().has(pk)&&!isTextToken(pk)?`<dt>Prefix</dt><dd>${hex(pre)} is a token</dd>`:'';
+  const kind=KIND(ch);
+  $('#detail').innerHTML=(kind?`<div class="big kind">${kind}</div>`:`<div class="big">${MARK.test(ch)?'◌':''}${esc(ch)}</div>`)+`<dl><dt>Code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)}</dd><dt>Tokens</dt><dd class="plain">${whole?'1, whole':'<span class="inv">split into '+ids.length+'</span>'}</dd><dt>Pieces</dt><dd class="split">${split}</dd>${prefixLine}</dl>${pinned!==null?'<div class="foot">Pinned. Click it again or press Esc to release.</div>':''}`;
+  $('#detail').classList.toggle('pinned',pinned!==null);
 }
 $('#map').addEventListener('mousemove',ev=>{
-  if(mapInfo&&mapInfo.overview){const g=overviewCell(ev);if(g!==null)showGroup(g);return;}
-  if(pinned!==null)return;const cp=cellAt(ev);if(cp!==null)showDetail(cp);});
+  if(!mapInfo)return;
+  if(mapInfo.overview){const g=overviewCell(ev);if(g===null){hideCard();return;}showGroup(g);placeCard(ev);return;}
+  if(pinned!==null)return;
+  const cp=cellAt(ev);if(cp===null){hideCard();return;}showDetail(cp);placeCard(ev);});
+$('#map').addEventListener('mouseleave',hideCard);
+// the card belongs to the cell under the pointer: scrolling moves the cell away, so drop it
+window.addEventListener('scroll',hideCard,{passive:true}); $('#mapscroll').addEventListener('scroll',hideCard,{passive:true});
 $('#map').addEventListener('click',ev=>{
-  if(mapInfo&&mapInfo.overview){const g=overviewCell(ev);if(g!==null)openGroup(g);return;}
-  const cp=cellAt(ev);if(cp===null)return;pinned=(pinned===cp)?null:cp;showDetail(cp);writeHash();});
+  if(!mapInfo)return;
+  if(mapInfo.overview){const g=overviewCell(ev);if(g!==null)openGroup(g);return;}
+  const cp=cellAt(ev);if(cp===null||pinned===cp){unpin();return;}
+  pinned=cp;showDetail(cp);placeCard(ev);writeHash();});
+let mapResizeT=null;
+window.addEventListener('resize',()=>{clearTimeout(mapResizeT);mapResizeT=setTimeout(drawMap,120);});
 
 
 /* ---- Coverage ----
    Table: coverage.json (precomputed by scripts/build_coverage.cjs with the same bytemap.js code).
    Detail: computed live for the selected tokenizer from freq.json. */
-let COV=null, FREQ=null, covMetric='weighted', covScript='han', covSort=null;
+let COV=null, FREQ=null, covMetric='wholeAll', covScript='han', covSort=null;
 // shade is cubed so 90% and 100% look different (most cells are above 80%)
 const METRIC={
-  weighted:{label:'share of real text that is whole tokens',fmt:v=>(100*v).toFixed(1)+'%',shade:v=>v*v*v},
   topWhole:{label:'share of the most frequent 1,000 characters that are whole tokens',fmt:v=>(100*v).toFixed(1)+'%',shade:v=>v*v*v},
   wholeAll:{label:'share of every character in the block that is a whole token',fmt:v=>(100*v).toFixed(1)+'%',shade:v=>v*v*v},
   tokPerChar:{label:'tokens per character in real text (1.00 is best)',fmt:v=>v.toFixed(2),shade:v=>Math.max(0,Math.min(1,(4-v)/3))},
 };
 async function loadCoverage(){
   if(COV)return;
-  [COV,FREQ]=await Promise.all([getData('coverage.json'),getData('freq.json')]);
+  Loader.start('cov','coverage data',0);
+  try{[COV,FREQ]=await Promise.all([getData('coverage.json'),getData('freq.json')]);}finally{Loader.end('cov');}
   $('#covscript').innerHTML=ByteMap.FEATURED.map(b=>`<option value="${b.id}">${b.name} — ${b.langs}</option>`).join('');
   $('#covchips').innerHTML=ByteMap.FEATURED.map(b=>`<button data-b="${b.id}" title="${b.name} — ${b.langs}">${SHORTB[b.id]||b.name}</button>`).join('');
 }
@@ -724,9 +904,9 @@ function renderCovTable(){
   let scripts=ByteMap.FEATURED.slice();
   if(covSort){const v=b=>{const r=covCell(covSort,b.id);return r&&r[covMetric]!==null?r[covMetric]:-1;};scripts.sort((a,b)=>covMetric==='tokPerChar'?v(a)-v(b):v(b)-v(a));}
   const few=sid=>FREQ.scripts[sid]&&FREQ.scripts[sid].total<10000;
-  let h='<thead><tr><th>script</th>'+toks.map(([e,sh])=>`<th data-enc="${e}"${covSort===e?' aria-sort="descending"':''} title="sort by ${sh}">${sh}</th>`).join('')+'</tr></thead><tbody>';
+  let h='<thead><tr><th>Script</th>'+toks.map(([e,sh])=>`<th data-enc="${e}"${covSort===e?' aria-sort="descending"':''} title="Sort by ${sh}">${sh}</th>`).join('')+'</tr></thead><tbody>';
   for(const b of scripts){
-    h+=`<tr><td class="sname">${b.name}${few(b.id)?' †':''}<small>${b.langs}</small></td>`;
+    h+=`<tr><td class="sname">${b.name}${covMetric!=='wholeAll'&&few(b.id)?' †':''}<small>${b.langs}</small></td>`;
     for(const [e] of toks){
       const r=covCell(e,b.id), v=r?r[covMetric]:null;
       if(v===null||v===undefined){h+=`<td class="v" data-enc="${e}" data-s="${b.id}" style="color:var(--muted)">–</td>`;continue;}
@@ -736,21 +916,21 @@ function renderCovTable(){
     h+='</tr>';
   }
   $('#covtable').innerHTML=h+'</tbody>';
-  $('#covnote').innerHTML=`Showing the ${M.label}. Frequencies: ${COV.source}. – = no frequency data (emoji). † = fewer than 10,000 occurrences in the sample, so treat weighted numbers as rough. Click a column header to sort.`;
+  $('#covnote').textContent=covMetric==='wholeAll'?'':'Frequencies from Wikipedia, Chinese counted as Simplified. † under 10,000 samples.';
 }
 function drawCovChart(C,F){
   const cv=$('#covchart'), W=Math.max(300,cv.clientWidth), H=240, dpr=window.devicePixelRatio||1;
   cv.width=W*dpr; cv.height=H*dpr; const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr);
   const cFg=cssVar('--fg'), cLine=cssVar('--line'), cMuted=cssVar('--muted'), cAcc=cssVar('--whole'), mono=cssVar('--mono');
-  const L=40, R=12, T=10, B=46, bar=12, n=F.chars.length, pw=W-L-R, ph=H-T-B-bar-6;
+  const L=40, R=12, T=10, B=40, bar=0, n=F.chars.length, pw=W-L-R, ph=H-T-B;
   const lx=r=>L+(n>1?Math.log10(r)/Math.log10(n):0)*pw; // rank (1-based), log scale
   ctx.clearRect(0,0,W,H); ctx.font=`10px ${mono}`; ctx.textBaseline='middle';
   // grid
   ctx.strokeStyle=cLine; ctx.fillStyle=cMuted; ctx.lineWidth=1;
   for(const y of [0,.25,.5,.75,1]){const py=T+ph*(1-y);ctx.beginPath();ctx.moveTo(L,py);ctx.lineTo(L+pw,py);ctx.stroke();ctx.fillText((100*y)+'%',4,py);}
   ctx.textAlign='center';
-  for(let k=1;k<=n;k*=10){const px=lx(k);ctx.beginPath();ctx.moveTo(px,T);ctx.lineTo(px,T+ph);ctx.stroke();ctx.fillText(k.toLocaleString(),px,H-B+bar+18);}
-  ctx.fillText('frequency rank (log scale): 1 = most common character',L+pw/2,H-8); ctx.textAlign='left';
+  for(let k=1;k<=n;k*=10){const px=lx(k);ctx.beginPath();ctx.moveTo(px,T);ctx.lineTo(px,T+ph);ctx.stroke();ctx.fillText(k.toLocaleString(),px,H-B+12);}
+  ctx.fillText('frequency rank, log scale',L+pw/2,H-8); ctx.textAlign='left';
   // cumulative lines
   let all=0, whole=0; const ptsA=[], ptsW=[];
   F.chars.forEach(([,c],i)=>{all+=c; if(C.isWhole[i])whole+=c; ptsA.push([lx(i+1),T+ph*(1-all/F.total)]); ptsW.push([lx(i+1),T+ph*(1-whole/F.total)]);});
@@ -759,32 +939,26 @@ function drawCovChart(C,F){
   line(ptsA,cMuted,1.5); line(ptsW,cAcc,2.5);
   // end labels
   ctx.fillStyle=cAcc; ctx.beginPath(); ctx.arc(ptsW[ptsW.length-1][0],ptsW[ptsW.length-1][1],3.5,0,7); ctx.fill();
-  // barcode: per pixel column, the share of ranks in it that are whole
-  const by=H-B+4;
-  for(let px=0;px<pw;px++){
-    const r0=Math.max(1,Math.floor(Math.pow(n,px/pw))), r1=Math.max(r0,Math.floor(Math.pow(n,(px+1)/pw))-1);
-    let w=0,t=0; for(let r=r0;r<=Math.min(r1,n);r++){t++;w+=C.isWhole[r-1];}
-    if(!t)continue; ctx.fillStyle=cLine; ctx.fillRect(L+px,by,1,bar); ctx.globalAlpha=w/t; ctx.fillStyle=cAcc; ctx.fillRect(L+px,by,1,bar); ctx.globalAlpha=1;
-  }
 }
 function renderCovDetail(){
+  if(!V)return;
   const blk=ByteMap.BLOCK[covScript], F=FREQ.scripts[covScript];
   $('#covscript').value=covScript;
   $('#covchips').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.b===covScript)));
-  $('#covtitle').textContent=`${blk.name}: characters ranked by how often they appear`;
-  const name=$('#encsel').selectedOptions[0].textContent.split(' · ')[0];
-  if(!F){$('#covsummary').textContent=`There is no frequency data for ${blk.name.toLowerCase()}: Wikipedia text isn't a fair sample of emoji use. The byte map still shows which emoji ${name} has as whole tokens.`;$('#covchart').getContext('2d').clearRect(0,0,9999,9999);$('#covsplit').innerHTML='';return;}
+  $('#covtitle').textContent=`${blk.name}, most frequent first`;
+  const name=encName();
+  if(!F){$('#covsummary').textContent=`No frequency data for ${blk.name}.`;$('#covchart').getContext('2d').clearRect(0,0,9999,9999);$('#covsplit').innerHTML='';return;}
   const C=ByteMap.coverage(V,blk,F);
   const splitIdx=[];for(let i=0;i<F.chars.length&&splitIdx.length<20;i++)if(!C.isWhole[i])splitIdx.push(i);
   const first=splitIdx.length?splitIdx[0]:-1;
   const pc=v=>(100*v).toFixed(1)+'%';
-  $('#covsummary').innerHTML=`In ${name}, <b>${pc(C.weighted)}</b> of the ${blk.name} characters in the sample are whole tokens, and <b>${pc(C.topWhole)}</b> of the ${C.topN.toLocaleString()} most frequent ones are. A character costs <b>${C.tokPerChar.toFixed(2)}</b> tokens on average.`+(first>=0?` The most frequent character that gets split is <b style="font-family:var(--cjk)">${String.fromCodePoint(F.chars[first][0])}</b> (rank ${first+1}, ${(100*F.chars[first][1]/F.total).toFixed(3)}% of the text).`:' Every character in the sample is a whole token.')+(F.total<10000?` <i>Only ${F.total} occurrences in the sample, so these numbers are rough.</i>`:'');
+  $('#covsummary').innerHTML=`<b>${esc(name)}</b> keeps <b>${C.whole.toLocaleString()}</b> of ${C.assigned.toLocaleString()} characters whole, and <b>${pc(C.topWhole)}</b> of the ${C.topN.toLocaleString()} most frequent.`+(first>=0?` The most frequent one it splits is <b>${String.fromCodePoint(F.chars[first][0])}</b>, at rank ${first+1}.`:'')+(F.total<10000?` Only ${F.total.toLocaleString()} samples, so treat this as rough.`:'');
   drawCovChart(C,F);
-  $('#covsplit').innerHTML=splitIdx.length?'<thead><tr><th>rank</th><th>char</th><th>share of text</th><th>tokens</th><th>pieces</th></tr></thead><tbody>'+splitIdx.map(i=>{const [cp,c]=F.chars[i];const ch=String.fromCodePoint(cp);const ids=V.splitChar(ch);return `<tr><td>${i+1}</td><td class="txt">${ch}</td><td>${(100*c/F.total).toFixed(3)}%</td><td>${ids.length}</td><td>${ids.map(id=>V.text[id]===null?'<span class="inv">'+hex(V.bytes[id])+'</span>':V.text[id]).join(' ')}</td></tr>`;}).join('')+'</tbody>':'<tbody><tr><td class="hint">None: every character in the sample is a whole token.</td></tr></tbody>';
+  $('#covsplit').innerHTML=splitIdx.length?'<thead><tr><th>Rank</th><th>Character</th><th>Share of text</th><th>Tokens</th><th>Pieces</th></tr></thead><tbody>'+splitIdx.map(i=>{const [cp,c]=F.chars[i];const ch=String.fromCodePoint(cp);const ids=V.splitChar(ch);return `<tr><td>${i+1}</td><td class="txt">${ch}</td><td>${(100*c/F.total).toFixed(3)}%</td><td>${ids.length}</td><td>${ids.map(id=>V.text[id]===null?'<span class="inv">'+hex(V.bytes[id])+'</span>':V.text[id]).join(' ')}</td></tr>`;}).join('')+'</tbody>':'<tbody><tr><td class="loading">None. Every character in the sample is a whole token.</td></tr></tbody>';
 }
 async function renderCoverage(){
   if($('#pane-cov').hidden||!V)return;
-  try{await loadCoverage();}catch(e){$('#covtable').innerHTML=`<tbody><tr><td>${e.message}</td></tr></tbody>`;return;}
+  try{await loadCoverage();}catch(e){Loader.fail(e.message,renderCoverage);return;}
   renderCovTable(); renderCovDetail();
 }
 $('#covmetric').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;covMetric=b.dataset.m;$('#covmetric').querySelectorAll('button').forEach(x=>x.setAttribute('aria-checked',String(x===b)));renderCovTable();});
@@ -796,7 +970,7 @@ $('#covtable').addEventListener('click',e=>{
 });
 $('#covchips').addEventListener('click',e=>{const b=e.target.closest('button[data-b]');if(!b)return;covScript=b.dataset.b;renderCovTable();renderCovDetail();writeHash();});
 $('#covcsv').addEventListener('click',async()=>{const a=document.createElement('a');a.href=await dataURL('coverage.csv');a.download='byte-pair-lens-coverage.csv';document.body.append(a);a.click();a.remove();});
-window.addEventListener('resize',()=>{if(!$('#pane-cov').hidden&&COV&&FREQ.scripts[covScript])drawCovChart(ByteMap.coverage(V,ByteMap.BLOCK[covScript],FREQ.scripts[covScript]),FREQ.scripts[covScript]);});
+window.addEventListener('resize',()=>{if(V&&!$('#pane-cov').hidden&&COV&&FREQ.scripts[covScript])drawCovChart(ByteMap.coverage(V,ByteMap.BLOCK[covScript],FREQ.scripts[covScript]),FREQ.scripts[covScript]);});
 
 /* ---- Merge tree (vocab browser) ---- */
 function treeLabel(id){const t=V.text[id];return t===null?hex(V.bytes[id]):t.replace(/\n/g,'⏎').replace(/\t/g,'⇥').replace(/ /g,'␣');}
@@ -810,38 +984,39 @@ function esc(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;');}
 function showTree(id){
   const T=V.mergeTree(id), el=$('#tree'); el.hidden=false;
   $('#rows').querySelectorAll('tr').forEach(r=>r.classList.toggle('sel',+r.dataset.id===id));
-  if(!T){el.innerHTML=`<h3>Token #${id} · ${esc(treeLabel(id))}</h3><p class="sub" style="font-family:var(--sans)">This token isn't built by merges: it is ${V.cats[V.cat[id]]==='special / added token'?'a special or added token':'a base symbol (a single byte or character)'}.</p>`;return;}
+  if(!T){el.innerHTML=`<h3>Token #${id} · ${esc(treeLabel(id))} · ${V.cats[V.cat[id]]==='special / added token'?'a special token':'a base symbol'}, not built by merges</h3>`;return;}
   let merges=0;(function c(n){if(n.left){merges++;c(n.left);c(n.right);}})(T);
-  el.innerHTML=`<h3>How token #${id} (${esc(treeLabel(id))}) was built · ${merges} merge${merges===1?'':'s'}</h3><p class="sub" style="font-family:var(--sans);margin-bottom:8px">Read bottom-up: BPE starts from the ${V.kind==='sp'?'characters':'bytes'} at the leaves and joins pairs into the tokens above them.${V.kind==='sp'?'':' Each number is a token id, which for byte-level BPE is also the order the merge was learned.'}</p><ul>${treeHTML(T,0)}</ul>`;
+  if(!merges){el.innerHTML=`<h3>Token #${id} · ${esc(treeLabel(id))} · a base symbol, not built by merges</h3>`;return;}
+  el.innerHTML=`<h3>Token #${id} · ${esc(treeLabel(id))} · ${merges} merge${merges===1?'':'s'}</h3><ul>${treeHTML(T,0)}</ul>`;
 }
 $('#rows').addEventListener('click',e=>{const tr=e.target.closest('tr[data-id]');if(tr)showTree(+tr.dataset.id);});
 
 /* ---- Tokenizer picker: rail + floating dock (the hidden #encsel stays the source of truth) ---- */
 const SHORT={'r50k_base':['GPT-2/3','50k'],'cl100k_base':['GPT-4','100k'],'o200k_base':['GPT-4o','200k'],'llama3.1':['Llama 3.1','128k'],'qwen3':['Qwen3','152k'],'deepseek-v3':['DeepSeek-V3','129k'],'gemma3':['Gemma 3','262k'],'mistral-v0.3':['Mistral v0.3','33k']};
-let busyEnc=null;
+let busyEnc=null; const sizes={};
+manifest().then(m=>{for(const o of $('#encsel').options){const e=o.value;sizes[e]=((m.files[e+'.json']||{}).size||0)+((m.files[e+'.merges.json']||{}).size||0);}return refreshSaved();}).then(()=>renderPickers());
 function chipHTML(o,first){
   const v=o.value;
-  if(v==='__upload')return `<span class="gsep" aria-hidden="true"></span><button class="chip own" data-enc="__upload" title="Load a Hugging Face tokenizer.json from your computer. It stays in this tab and is never uploaded.">${Logos.svg('own:')}<span>Your file</span></button>`;
+  if(v==='__upload')return `<span class="gsep" aria-hidden="true"></span><button class="chip own" data-enc="__upload" title="Load a Hugging Face tokenizer.json from your computer. It stays in this tab and is never uploaded.">${Logos.svg('own:')}<span>Your tokenizer.json</span></button>`;
   const [nm,size]=SHORT[v]||[o.textContent.split(' · ')[0],o.textContent.split(' · ').pop().replace(' tokens','')];
   const sep=first?'<span class="gsep" aria-hidden="true"></span>':'';
-  return `${sep}<button class="chip${busyEnc===v?' busy':''}" role="radio" aria-checked="${v===curEnc}" data-enc="${v}" title="${o.textContent}">${Logos.svg(v)}<span>${nm}</span><span class="meta">${size}</span></button>`;
+  return `${sep}<button class="chip${busyEnc===v?' busy':''}" role="radio" aria-checked="${v===curEnc}" data-enc="${v}" title="${o.textContent}${saved.has(v)?' · saved on this device':sizes[v]?' · '+mb(sizes[v])+' download, kept on this device afterwards':''}">${Logos.svg(v)}<span>${nm}</span><span class="meta">${size}</span></button>`;
 }
 function renderPickers(){
   const groups=[...$('#encsel').querySelectorAll('optgroup')];
   const html=groups.map((g,gi)=>[...g.querySelectorAll('option')].map((o,i)=>chipHTML(o,gi>0&&i===0&&o.value!=='__upload')).join('')).join('');
   $('#dockrail').innerHTML=html;
-  // the rail leaves out the upload chip: it lives in the label row so all eight tokenizers fit on one line
-  $('#encrail').innerHTML=html.replace(/<span class="gsep" aria-hidden="true"><\/span><button class="chip own"[\s\S]*$/,'');
+  $('#encrail').innerHTML=html;
   const cur=$('#encsel').selectedOptions[0]; const [nm]=SHORT[curEnc]||[cur?cur.textContent.split(' · ')[0]:curEnc];
   $('#dockpill').innerHTML=`${Logos.svg(curEnc)}<span>${nm}</span><span aria-hidden="true">▴</span>`;
 }
 function pickEnc(v){
   if(v==='__upload'){$('#ownfile').click();return;}
-  if(v===curEnc)return;
+  if(v===curEnc&&V)return;
   busyEnc=v; renderPickers();
-  switchEnc(v).catch(err=>{$('#loadstatus').textContent='could not load: '+err.message;}).finally(()=>{busyEnc=null;renderPickers();});
+  $('#loadstatus').textContent='';
+  switchEnc(v).catch(err=>Loader.fail(err.message,()=>pickEnc(v))).finally(()=>{busyEnc=null;renderPickers();});
 }
-$('#ownbtn').onclick=()=>$('#ownfile').click();
 for(const r of ['#encrail','#dockrail'])$(r).addEventListener('click',e=>{const b=e.target.closest('.chip');if(b)pickEnc(b.dataset.enc);});
 // dock: shown while the rail is off screen; the user can fold it into a pill (remembered per browser)
 let dockFolded=false; try{dockFolded=localStorage.getItem('bpl-dock')==='pill';}catch(e){}
@@ -861,19 +1036,19 @@ $('#ownfile').addEventListener('change',async e=>{
     const name='own:'+f.name.replace(/\.json$/i,''), label=f.name.replace(/\.json$/i,'');
     const {vocab,merges}=HFImport.convert(j,name,label+' (your file)');
     const v=BPE.load(vocab); if(merges)v.setMerges(merges);
-    cache[name]=Promise.resolve(v);
+    cache[name]=Promise.resolve(v); ready[name]=v;
     if(![...$('#encsel').options].some(o=>o.value===name)){
       const o=document.createElement('option'); o.value=name; o.textContent=`${label} (your file) · ${Math.round(v.bytes.length/1000)}k tokens`;
       $('#owngroup').insertBefore(o,$('#owngroup').lastElementChild);
     }
     await switchEnc(name);
-    st.textContent=`Loaded ${f.name}: ${v.bytes.length.toLocaleString()} tokens, ${v.kind==='sp'?'BPE with byte fallback':'byte-level BPE'}. It stays in this tab only and is never uploaded.`;
-  }catch(err){st.textContent=(err instanceof SyntaxError?`${f.name} is not valid JSON.`:err.message)+' Supported: Hugging Face tokenizer.json files with a BPE model (byte-level, or byte fallback).';}
+    st.textContent=`${f.name}: ${v.bytes.length.toLocaleString()} tokens. It stays in this tab and is never uploaded.`;
+  }catch(err){st.textContent=(err instanceof SyntaxError?`${f.name} is not valid JSON.`:err.message)+' Use a Hugging Face tokenizer.json with a BPE model.';}
 });
 
 /* ---- Compare ---- */
-let cmpSel=['cl100k_base','o200k_base','qwen3','gemma3'], cmpBusy=0;
-function encOptions(){return [...$('#encsel').options].filter(o=>o.value!=='__upload').map(o=>({enc:o.value,label:o.textContent.split(' · ')[0]}));}
+let cmpSel=['r50k_base','cl100k_base','o200k_base','qwen3'], cmpBusy=0;
+function encOptions(){return [...$('#encsel').options].filter(o=>o.value!=='__upload').map(o=>({enc:o.value,label:(SHORT[o.value]||[o.textContent.split(' · ')[0]])[0]}));}
 function renderCmpPick(){
   $('#cmppick').innerHTML=encOptions().map(({enc,label})=>{const on=cmpSel.includes(enc);return `<label><input type="checkbox" value="${enc}"${on?' checked':''}${!on&&cmpSel.length>=4?' disabled':''}>${label}</label>`;}).join('');
 }
@@ -883,7 +1058,8 @@ async function renderCompare(){
   const text=$('#cmpinput').value, nchars=[...text].length, job=++cmpBusy;
   const rows=$('#cmprows');
   rows.innerHTML=cmpSel.map(e=>`<div class="cmprow" data-enc="${e}"><div class="cmphead"><span class="nm">${encOptions().find(o=>o.enc===e)?.label||e}</span><span class="loading">loading…</span></div></div>`).join('');
-  const loaded=await Promise.all(cmpSel.map(e=>load(e).then(Vx=>({e,Vx}),err=>({e,err:err.message}))));
+  Loader.hold();
+  let loaded; try{loaded=await Promise.all(cmpSel.map(e=>load(e).then(Vx=>({e,Vx}),err=>({e,err:err.message}))));}finally{Loader.release();}
   if(job!==cmpBusy)return; // a newer render started
   const res=loaded.map(r=>{if(r.err)return r;const ids=r.Vx.encode(text);return {...r,ids,frags:ids.filter(id=>r.Vx.text[id]===null).length};});
   const min=Math.min(...res.filter(r=>r.ids).map(r=>r.ids.length||1));
@@ -893,7 +1069,7 @@ async function renderCompare(){
     const label=encOptions().find(o=>o.enc===r.e)?.label||r.e;
     if(r.err){div.innerHTML=`<div class="cmphead"><span class="nm">${label}</span><span>could not load: ${r.err}</span></div>`;rows.append(div);continue;}
     const n=r.ids.length;
-    div.innerHTML=`<div class="cmphead"><span class="nm">${label}</span><span>tokens <b>${n}</b>${n>min?` (${(n/min).toFixed(2)}× the fewest)`:' (fewest)'}</span><span>tokens/char <b>${nchars?(n/nchars).toFixed(2):'–'}</b></span><span>byte fragments <b>${r.frags}</b></span><span class="cmpbar" aria-hidden="true"><span style="width:${(100*min/Math.max(1,n)).toFixed(1)}%"></span></span></div><div class="strip compact"></div>`;
+    div.innerHTML=`<div class="cmphead"><span class="nm">${label}</span><span>tokens <b>${n}</b>${n>min?` (${(n/min).toFixed(2)}× the fewest)`:' (fewest)'}</span><span>tokens/char <b>${nchars?(n/nchars).toFixed(2):'–'}</b></span><span>fragments <b>${r.frags}</b></span><span class="cmpbar" aria-hidden="true"><span style="width:${(100*min/Math.max(1,n)).toFixed(1)}%"></span></span></div><div class="strip compact"></div>`;
     fillStrip(div.querySelector('.strip'),r.Vx,r.ids,true);
     rows.append(div);
   }
@@ -904,31 +1080,54 @@ let cmpTimer=null;
 $('#cmpinput').addEventListener('input',()=>{clearTimeout(cmpTimer);cmpTimer=setTimeout(renderCompare,150);});
 $('#cmpsamples').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;$('#cmpinput').value=b.dataset.s;renderCompare();});
 
-const TABS=['tok','map','cov','cmp'];
-function currentTab(){return TABS.find(t=>!$('#pane-'+t).hidden)||'tok';}
+const TABS=['map','tok','cov','cmp'];
+function currentTab(){return TABS.find(t=>!$('#pane-'+t).hidden)||'map';}
 function showTab(id,noHash){
   for(const t of TABS){$('#pane-'+t).hidden=t!==id;$('#tab-'+t).setAttribute('aria-selected',String(t===id));}
-  if(id==='map')drawMap();
+  if(id==='map')drawMap(); else{$('#detail').hidden=true;}
+  if(booted&&id!=='map'&&id!=='cmp'&&!V){ // this tab needs the vocabulary that is still loading behind the map
+    Loader.hold(); load(curEnc).catch(()=>{}).then(()=>setTimeout(()=>Loader.release(),60));
+  }
+  if(id==='tok'&&V&&tokDirty)renderTok();
   if(id==='cov')renderCoverage();
   if(id==='cmp')renderCompare();
-  if(V&&!noHash)writeHash();
+  if(!noHash)writeHash();
 }
 for(const t of TABS)$('#tab-'+t).onclick=()=>showTab(t);
 {const h=readHash(); if(h.block&&(BLOCK[h.block]||h.block==='overview'))$('#blocksel').value=h.block; if(h.cp&&/^[0-9A-F]+$/i.test(h.cp))pinned=parseInt(h.cp,16); if(h.script)covScript=h.script; if(h.cmp){const ok=h.cmp.split(',').filter(e=>[...$('#encsel').options].some(o=>o.value===e)).slice(0,4);if(ok.length)cmpSel=ok;} if(TABS.includes(h.tab))showTab(h.tab,true);}
 
 // URL state: #enc=qwen3&tab=map (a bare #map still opens the map)
 function readHash(){const h={};for(const kv of location.hash.slice(1).split('&')){if(!kv)continue;const [k,v]=kv.split('=');h[k]=v===undefined?'':decodeURIComponent(v);}if('map' in h)h.tab='map';return h;}
-function writeHash(){const tab=currentTab();let h='#enc='+curEnc;if(tab==='map'){h+='&tab=map&block='+$('#blocksel').value;if(pinned!==null)h+='&cp='+pinned.toString(16).toUpperCase();}if(tab==='cov')h+='&tab=cov&script='+covScript;if(tab==='cmp')h+='&tab=cmp&cmp='+cmpSel.join(',');history.replaceState(null,'','#'+h.slice(1));}
+function writeHash(){const tab=currentTab();let h='#enc='+curEnc;if(tab==='tok')h+='&tab=tok';if(tab==='map'){h+='&tab=map&block='+$('#blocksel').value;if(pinned!==null)h+='&cp='+pinned.toString(16).toUpperCase();}if(tab==='cov')h+='&tab=cov&script='+covScript;if(tab==='cmp')h+='&tab=cmp&cmp='+cmpSel.join(',');history.replaceState(null,'','#'+h.slice(1));}
+/* Switching tokenizer: the map redraws at once from the bitmap; the vocabulary follows from the worker
+   and fills in everything that needs it. The veil only comes up when the visible tab can't show
+   anything without the vocabulary. */
+let switchSeq=0;
+function showPinned(){if(pinned!==null&&!$('#pane-map').hidden&&mapInfo&&!mapInfo.overview){showDetail(pinned);placeCard();}}
+// the Tokenize tab is only rendered while it is the one on screen (tokDirty)
+function renderTok(){render(); renderBars(); page=0; renderTable(); $('#tree').hidden=true; tokDirty=false;}
+function renderV(){
+  if($('#pane-tok').hidden)tokDirty=true; else renderTok();
+  if(!$('#detail').hidden&&!$('#pane-map').hidden&&mapInfo&&!mapInfo.overview&&lastCp!==null)showDetail(lastCp);
+}
 async function switchEnc(enc){
-  $('#encsel').value=enc; $('#encsel').disabled=true;
-  try{ V=await load(enc); curEnc=enc; }
-  finally{ $('#encsel').disabled=false; }
-  $('#encsel').value=curEnc;
-  renderPickers(); render(); renderBars(); page=0; renderTable(); $('#tree').hidden=true; drawMap(); if(pinned!==null&&!$('#pane-map').hidden)showDetail(pinned); if(!$('#pane-cov').hidden)renderCoverage(); writeHash();
+  const seq=++switchSeq; booted=true; curEnc=enc; V=ready[enc]||null; $('#encsel').value=enc; renderPickers();
+  const lite=!!bitsFor(enc);
+  if(lite){drawMap();showPinned();}
+  writeHash();
+  const blocking=!V&&(!lite||currentTab()!=='map'); if(blocking)Loader.hold();
+  try{
+    if(!V){const v=await load(enc); if(seq!==switchSeq)return; V=v;}
+    if(!lite){drawMap();showPinned();}
+    renderV();
+    if(!$('#pane-cov').hidden)await renderCoverage();
+    if(!$('#pane-cmp').hidden)renderCompare();
+    if(blocking)await new Promise(r=>requestAnimationFrame(()=>setTimeout(r)));
+  }finally{if(blocking)Loader.release();}
 }
 $('#input').addEventListener('input',render);
 $('#samples').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;$('#input').value=b.dataset.s;render();});
-$('#encsel').addEventListener('change',e=>{if(e.target.value==='__upload'){e.target.value=curEnc;$('#ownfile').click();return;}switchEnc(e.target.value).catch(err=>{$('#strip').innerHTML='<span class="loading">could not load vocab: '+err.message+'</span>'})});
+$('#encsel').addEventListener('change',e=>{if(e.target.value==='__upload'){e.target.value=curEnc;$('#ownfile').click();return;}pickEnc(e.target.value);});
 $('#q').addEventListener('input',()=>{page=0;renderTable();});
 $('#catsel').addEventListener('change',()=>{page=0;renderTable();});
 $('#sort').addEventListener('change',()=>{page=0;renderTable();});
@@ -936,7 +1135,18 @@ $('#prev').onclick=()=>{page--;renderTable();};
 $('#next').onclick=()=>{page++;renderTable();};
 renderPickers();
 const H=readHash(); const startEnc=[...$('#encsel').options].some(o=>o.value===H.enc)?H.enc:'cl100k_base';
-switchEnc(startEnc).catch(e=>{$('#strip').innerHTML='<span class="loading">could not load vocab: '+e.message+'</span>'});
+// First paint: the bitmaps (one small file) and the fonts. The vocabulary loads behind the drawn map.
+(function boot(){
+  Loader.hold();
+  const fonts=document.fonts&&document.fonts.ready?Promise.race([document.fonts.ready,new Promise(r=>setTimeout(r,1500))]):Promise.resolve();
+  const start=()=>{const p=switchEnc(startEnc);p.then(()=>setTimeout(prefetchRest,1200),e=>Loader.fail(e.message,start));return p;};
+  getData('whole.json').then(w=>{WHOLE=w;},()=>{}).then(async()=>{
+    const p=start();
+    await fonts;
+    if(!(bitsFor(startEnc)&&currentTab()==='map'))await p.catch(()=>{}); // no bitmap, or a tab that needs the vocabulary: wait for it
+    drawMap(); Loader.release();
+  });
+})();
 })();
 </script>
 </body>
