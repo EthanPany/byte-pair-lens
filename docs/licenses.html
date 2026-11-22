@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Licenses · Byte Pair Lens</title>
+<style>
+@font-face{font-family:"IBM Plex Sans";font-weight:400;font-display:swap;src:url(fonts/ibm-plex-sans-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Sans";font-weight:600;font-display:swap;src:url(fonts/ibm-plex-sans-latin-600-normal.woff2) format("woff2")}
+:root{--bg:#fff;--fg:#111;--muted:#5c5c5c;--line:#d9d9d9}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 "IBM Plex Sans",system-ui,"Helvetica Neue",Arial,sans-serif;padding:28px 20px 96px}
+main{max-width:760px;margin:0 auto}
+h1{font-size:1.35rem;font-weight:600;margin:0 0 4px}
+a{color:var(--fg);text-underline-offset:3px}
+.back{color:var(--muted);font-size:.92rem}
+table{border-collapse:collapse;width:100%;margin-top:28px;border-top:1px solid var(--fg)}
+th,td{text-align:left;vertical-align:top;padding:10px 16px 10px 0;border-bottom:1px solid var(--line)}
+th{font-weight:500;color:var(--muted);font-size:.85rem}
+td:first-child{font-weight:600;white-space:nowrap}
+p{color:var(--muted);margin:22px 0 0}
+</style>
+</head>
+<body>
+<main>
+  <h1>Licenses</h1>
+  <a class="back" href="./">← Byte Pair Lens</a>
+  <table>
+    <thead><tr><th>Part</th><th>License</th></tr></thead>
+    <tbody>
+      <tr><td>Byte Pair Lens</td><td>MIT. <a href="https://github.com/EthanPany/byte-pair-lens">Source on GitHub</a></td></tr>
+      <tr><td>GPT-2/3, GPT-4, GPT-4o</td><td>Vocabularies from OpenAI tiktoken, through the gpt-tokenizer package. MIT.</td></tr>
+      <tr><td>Llama 3.1</td><td><b>Built with Llama.</b> Llama 3.1 is licensed under the Llama 3.1 Community License, Copyright © Meta Platforms, Inc. All Rights Reserved. <a href="licenses/LLAMA-3.1-COMMUNITY-LICENSE.txt">License</a></td></tr>
+      <tr><td>Gemma 3</td><td>Gemma is provided under and subject to the Gemma Terms of Use found at gemma.ai/resources/terms. The use restrictions in Section 3.2 of those terms and the Gemma Prohibited Use Policy apply to these files. <a href="licenses/GEMMA-TERMS-OF-USE.txt">Terms</a></td></tr>
+      <tr><td>DeepSeek-V3</td><td>Subject to the DeepSeek License Agreement, including the use-based restrictions in paragraph 5 and Attachment A. <a href="licenses/DEEPSEEK-LICENSE-MODEL.txt">License</a></td></tr>
+      <tr><td>Qwen3, Mistral 7B v0.3</td><td>Apache-2.0.</td></tr>
+      <tr><td>IBM Plex</td><td>Fonts. SIL Open Font License 1.1. <a href="fonts/OFL.txt">License</a></td></tr>
+      <tr><td>Character frequencies</td><td>Counted from Wikipedia text, CC BY-SA 4.0.</td></tr>
+    </tbody>
+  </table>
+  <p>Only tokenizer vocabularies are redistributed here, never model weights. <a href="licenses/NOTICE.txt">Full notice</a></p>
+</main>
+</body>
+</html>
