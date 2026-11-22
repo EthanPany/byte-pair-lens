@@ -230,7 +230,6 @@ footer a:hover{color:var(--fg)}
 <div class="wrap">
   <header>
     <h1>Byte Pair Lens</h1>
-    <p class="sub">Which characters does a tokenizer keep whole, and which does it break into bytes?</p>
   </header>
   <div class="rail" id="encrail" role="radiogroup" aria-label="Tokenizer"></div>
   <p class="note" id="loadstatus" aria-live="polite"></p>
@@ -732,6 +731,8 @@ $('#map').addEventListener('mousemove',ev=>{
   if(pinned!==null)return;
   const cp=cellAt(ev);if(cp===null){hideCard();return;}showDetail(cp);placeCard(ev);});
 $('#map').addEventListener('mouseleave',hideCard);
+// the card belongs to the cell under the pointer: scrolling moves the cell away, so drop it
+window.addEventListener('scroll',hideCard,{passive:true}); $('#mapscroll').addEventListener('scroll',hideCard,{passive:true});
 $('#map').addEventListener('click',ev=>{
   if(!mapInfo)return;
   if(mapInfo.overview){const g=overviewCell(ev);if(g!==null)openGroup(g);return;}
