@@ -407,6 +407,7 @@ const Loader=(function(){
     prep(id){const j=jobs.get(id);if(j){j.got=j.total;j.prep=true;paint();}},
     local(id){const j=jobs.get(id);if(j){j.local=true;j.got=j.total;paint();}},
     end(id){jobs.delete(id);paint();},
+    busy(){return jobs.size>0||holds>0;},
     hold(){holds++;paint();},
     release(){holds=Math.max(0,holds-1);paint();},
     fail(msg,retry){
@@ -436,6 +437,7 @@ async function dataURL(name){const m=await manifest();const f=m.files[name];retu
 // fetch a data file, from Cache Storage when we have this version; onBytes(n) reports progress
 async function getData(name,onBytes){
   const url=await dataURL(name);
+  if(prefetching[url])await prefetching[url]; // already on its way in the background: wait for it instead of downloading twice
   let store=null;
   try{store=await caches.open(DATA_CACHE);const hit=await store.match(url);if(hit){onBytes&&onBytes(Infinity);return hit.json();}}catch(e){store=null;}
   const r=await fetch(url); if(!r.ok)throw new Error(name+': HTTP '+r.status);
@@ -463,6 +465,44 @@ async function refreshSaved(){
     for(const o of $('#encsel').options){const e=o.value;if(m.files[e+'.json']&&has(e+'.json')&&has(e+'.merges.json'))saved.add(e);}
   }catch(e){}
   if(navigator.storage&&navigator.storage.persist&&saved.size&&!/Firefox/.test(navigator.userAgent))navigator.storage.persist().catch(()=>{}); // ask the browser not to evict them
+}
+/* Background prefetch: once the page is showing, quietly save the other tokenizers to this device,
+   smallest first, one at a time, so later switches skip the download. It never blocks the page: it waits
+   while anything is loading in the foreground, and it does not run on metered or slow connections or
+   when storage is short. Only bytes are saved; a vocabulary is still built when it is first opened. */
+const prefetching={};
+async function prefetchOne(name){
+  const url=await dataURL(name), store=await caches.open(DATA_CACHE);
+  if(await store.match(url))return;
+  const job=(async()=>{
+    const r=await fetch(url,{priority:'low'}); if(!r.ok)throw new Error('HTTP '+r.status);
+    await store.put(url,r);
+    for(const k of await store.keys()){const u=new URL(k.url);if(u.pathname.endsWith('/'+name)&&!k.url.endsWith(url))store.delete(k);}
+  })();
+  prefetching[url]=job.catch(()=>{});
+  try{await job;}finally{delete prefetching[url];}
+}
+async function prefetchRest(){
+  try{
+    if(!('caches' in window))return;
+    const c=navigator.connection||{};
+    if(c.saveData||c.type==='cellular'||/(^|-)2g$/.test(c.effectiveType||''))return;
+    const m=await manifest(); await refreshSaved();
+    const size=f=>(m.files[f]||{}).size||0;
+    const todo=[...$('#encsel').options].map(o=>o.value).filter(e=>m.files[e+'.json']&&!saved.has(e))
+      .map(e=>({e,files:[e+'.json',e+'.merges.json'].filter(f=>m.files[f])}))
+      .map(t=>({...t,bytes:t.files.reduce((a,f)=>a+size(f),0)})).sort((a,b)=>a.bytes-b.bytes);
+    if(navigator.storage&&navigator.storage.estimate){
+      const {quota=0,usage=0}=await navigator.storage.estimate();
+      if(quota-usage<3*todo.reduce((a,t)=>a+t.bytes,0)+50e6)return; // keep well clear of the browser's limit
+    }
+    for(const f of ['coverage.json','freq.json'])if(m.files[f])await prefetchOne(f).catch(()=>{});
+    for(const t of todo){
+      while(Loader.busy()||document.hidden)await new Promise(r=>setTimeout(r,700));
+      if(saved.has(t.e))continue;
+      try{for(const f of t.files)await prefetchOne(f);saved.add(t.e);renderPickers();}catch(e){return;} // offline or blocked: stop quietly
+    }
+  }catch(e){}
 }
 // one in-flight promise per tokenizer, so the Tokenizer and Compare tabs never download twice
 function load(enc){
@@ -1000,7 +1040,7 @@ const H=readHash(); const startEnc=[...$('#encsel').options].some(o=>o.value===H
 (function boot(){
   Loader.hold();
   const fonts=document.fonts&&document.fonts.ready?Promise.race([document.fonts.ready,new Promise(r=>setTimeout(r,1500))]):Promise.resolve();
-  Promise.all([switchEnc(startEnc),fonts]).then(()=>{drawMap();Loader.release();},e=>Loader.fail(e.message,()=>{Loader.release();boot();}));
+  Promise.all([switchEnc(startEnc),fonts]).then(()=>{drawMap();Loader.release();setTimeout(prefetchRest,1200);},e=>Loader.fail(e.message,()=>{Loader.release();boot();}));
 })();
 })();
 </script>
