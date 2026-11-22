@@ -9,7 +9,9 @@
     'deepseek-v3': 'deepseek', 'gemma3': 'google', 'mistral-v0.3': 'mistralai' };
   function svg(enc) {
     const k = enc.startsWith('own:') ? 'own' : OF[enc];
-    if (k === 'gpt') return '<span class="logo badge" aria-hidden="true">GPT</span>';
+    // to use OpenAI's own mark, add its official 24x24 path to PATHS as "openai" (see openai.com/brand)
+    if (k === 'gpt' && !PATHS.openai) return '<span class="logo badge" aria-hidden="true">GPT</span>';
+    if (k === 'gpt') return `<svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="${PATHS.openai}"/></svg>`;
     if (k === 'own') return '<svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l5 5h-3.5v6h-3V8H7zM5 16h3v2h8v-2h3v5H5z"/></svg>';
     if (!PATHS[k]) return '';
     return `<svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="${PATHS[k]}"/></svg>`;

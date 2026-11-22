@@ -70,8 +70,10 @@ button,input,select,textarea{font:inherit;color:inherit;border-radius:0}
 .dock[data-state="pill"] .dockpill{display:inline-flex}
 @media (max-width:760px){.dockrail{-webkit-mask-image:linear-gradient(to right,#000 82%,transparent);mask-image:linear-gradient(to right,#000 82%,transparent);padding-right:24px}}
 .tabs{display:flex;gap:26px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
-.tabs button{font-weight:500;font-size:.98rem;background:none;border:0;border-bottom:2px solid transparent;padding:8px 0;color:var(--muted);cursor:pointer;margin-bottom:-1px;white-space:nowrap}
+.tabs button{display:inline-flex;align-items:center;gap:8px;font-weight:500;font-size:.98rem;background:none;border:0;border-bottom:2px solid transparent;padding:8px 0;color:var(--muted);cursor:pointer;margin-bottom:-1px;white-space:nowrap}
 .tabs button:hover{color:var(--fg)}
+.ti{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1}
+.ti [fill]{stroke:none}
 .tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--fg);font-weight:600}
 textarea{width:100%;min-height:92px;font-size:1rem;line-height:1.6;background:var(--bg);border:1px solid var(--line);padding:11px 13px;resize:vertical}
 textarea:focus,input[type=search]:focus,select:focus{border-color:var(--fg);outline:0}
@@ -260,10 +262,10 @@ footer a:hover{color:var(--fg)}
   </div>
 
   <div class="tabs" role="tablist">
-    <button role="tab" id="tab-map" aria-selected="true" aria-controls="pane-map">Byte map</button>
-    <button role="tab" id="tab-tok" aria-selected="false" aria-controls="pane-tok">Tokenize</button>
-    <button role="tab" id="tab-cov" aria-selected="false" aria-controls="pane-cov">Coverage</button>
-    <button role="tab" id="tab-cmp" aria-selected="false" aria-controls="pane-cmp">Compare</button>
+    <button role="tab" id="tab-map" aria-selected="true" aria-controls="pane-map"><svg class="ti" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="4" height="4" fill="currentColor"/><rect x="6" y="1" width="4" height="4" fill="currentColor"/><rect x="11.5" y="1.5" width="3" height="3"/><rect x="1.5" y="6.5" width="3" height="3"/><rect x="6" y="6" width="4" height="4" fill="currentColor"/><rect x="11.5" y="6.5" width="3" height="3"/><rect x="1.5" y="11.5" width="3" height="3"/><rect x="6.5" y="11.5" width="3" height="3"/><rect x="11" y="11" width="4" height="4" fill="currentColor"/></svg>Byte map</button>
+    <button role="tab" id="tab-tok" aria-selected="false" aria-controls="pane-tok"><svg class="ti" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="5.5" width="13" height="5"/><path d="M5.5 3v10M10.5 3v10"/></svg>Tokenize</button>
+    <button role="tab" id="tab-cov" aria-selected="false" aria-controls="pane-cov"><svg class="ti" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 14.5h13"/><rect x="2.5" y="8.5" width="2.5" height="6" fill="currentColor"/><rect x="6.75" y="2.5" width="2.5" height="12" fill="currentColor"/><rect x="11" y="5.5" width="2.5" height="9" fill="currentColor"/></svg>Coverage</button>
+    <button role="tab" id="tab-cmp" aria-selected="false" aria-controls="pane-cmp"><svg class="ti" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="4"/><rect x="1.5" y="9.5" width="8" height="4"/><path d="M6 2.5v4M10.5 2.5v4M5.5 9.5v4"/></svg>Compare</button>
   </div>
 
   <div id="pane-map" role="tabpanel">
@@ -391,15 +393,17 @@ const Loader=(function(){
     if(!jobs.size&&!holds){clearTimeout(showT);showT=null;veil.dataset.on='0';return;}
     const js=[...jobs.values()]; let got=0,total=0,prep=true;
     for(const j of js){total+=j.total;got+=Math.min(j.got,j.total);if(!j.prep)prep=false;}
-    if(js.length)$('#veilwhat').textContent=js.length===1?`Loading ${js[0].label}`:`Loading ${js.length} tokenizers`;
+    const local=js.length&&js.every(j=>j.local);
+    if(js.length)$('#veilwhat').textContent=(local?'Opening ':'Loading ')+(js.length===1?js[0].label:`${js.length} tokenizers`);
     $('#veilfill').style.width=(js.length?(total?100*got/total:0):100).toFixed(1)+'%';
-    $('#veilhow').textContent=!js.length||prep?'Preparing…':total?`${mb(got)} of ${mb(total)}`:'';
+    $('#veilhow').textContent=local?'Saved on this device':!js.length||prep?'Preparing…':total&&got?`${mb(got)} of ${mb(total)}`:'';
     if(veil.dataset.on!=='1'&&!showT)showT=setTimeout(()=>{showT=null;if(jobs.size||holds)veil.dataset.on='1';},150);
   }
   return {
     start(id,label,total){const j=jobs.get(id)||{got:0};jobs.set(id,{...j,label,total:total||0});paint();},
     update(id,got){const j=jobs.get(id);if(j){j.got=got;paint();}},
     prep(id){const j=jobs.get(id);if(j){j.got=j.total;j.prep=true;paint();}},
+    local(id){const j=jobs.get(id);if(j){j.local=true;j.got=j.total;paint();}},
     end(id){jobs.delete(id);paint();},
     hold(){holds++;paint();},
     release(){holds=Math.max(0,holds-1);paint();},
@@ -421,7 +425,9 @@ const Loader=(function(){
 const DATA_CACHE='bpl-data-v1';
 let manifestP=null;
 function manifest(){
-  if(!manifestP)manifestP=fetch('manifest.json',{cache:'no-cache'}).then(r=>r.ok?r.json():{files:{}}).catch(()=>({files:{}}));
+  if(!manifestP)manifestP=fetch('manifest.json',{cache:'no-cache'}).then(r=>{if(!r.ok)throw 0;return r.json();})
+    .then(m=>{try{localStorage.setItem('bpl-manifest',JSON.stringify(m));}catch(e){}return m;})
+    .catch(()=>{try{return JSON.parse(localStorage.getItem('bpl-manifest'))||{files:{}};}catch(e){return {files:{}};}}); // offline: the last manifest still matches the saved files
   return manifestP;
 }
 async function dataURL(name){const m=await manifest();const f=m.files[name];return f?`${name}?v=${f.v}`:name;}
@@ -445,6 +451,17 @@ async function getData(name,onBytes){
   }
   return JSON.parse(await body.text());
 }
+// Tokenizers already saved on this device (Cache Storage). They open without a download.
+const saved=new Set();
+async function refreshSaved(){
+  try{
+    const m=await manifest(), store=await caches.open(DATA_CACHE), have=new Set((await store.keys()).map(k=>k.url.split('/').pop()));
+    const has=f=>!m.files[f]||have.has(`${f}?v=${m.files[f].v}`);
+    saved.clear();
+    for(const o of $('#encsel').options){const e=o.value;if(m.files[e+'.json']&&has(e+'.json')&&has(e+'.merges.json'))saved.add(e);}
+  }catch(e){}
+  if(navigator.storage&&navigator.storage.persist&&saved.size&&!/Firefox/.test(navigator.userAgent))navigator.storage.persist().catch(()=>{}); // ask the browser not to evict them
+}
 // one in-flight promise per tokenizer, so the Tokenizer and Compare tabs never download twice
 function load(enc){
   if(!cache[enc])cache[enc]=loadNow(enc).catch(e=>{delete cache[enc];throw e;});
@@ -456,14 +473,15 @@ async function loadNow(enc){
   try{
     const m=await manifest();
     const files=[enc+'.json'], sp=m.files[enc+'.merges.json']; if(sp)files.push(enc+'.merges.json');
-    const size=f=>(m.files[f]||{}).size||0, got={};
+    const size=f=>(m.files[f]||{}).size||0, got={}, hit=new Set();
     Loader.start(enc,label,files.reduce((a,f)=>a+size(f),0));
     // vocabulary and merges download in parallel
-    const [j,merges]=await Promise.all(files.map(f=>getData(f,n=>{got[f]=Math.min(n,size(f)||n);Loader.update(enc,files.reduce((a,x)=>a+(got[x]||0),0));})));
+    const [j,merges]=await Promise.all(files.map(f=>getData(f,n=>{if(n===Infinity){hit.add(f);if(hit.size===files.length)Loader.local(enc);}got[f]=Math.min(n,size(f)||n);Loader.update(enc,files.reduce((a,x)=>a+(got[x]||0),0));})));
     Loader.prep(enc);
     await new Promise(r=>setTimeout(r,30)); // let the card paint before the synchronous build
     const v=BPE.load(j);
     if(v.kind==='sp')v.setMerges(merges);
+    saved.add(enc);
     return v;
   }finally{Loader.end(enc);}
 }
@@ -853,13 +871,14 @@ $('#rows').addEventListener('click',e=>{const tr=e.target.closest('tr[data-id]')
 
 /* ---- Tokenizer picker: rail + floating dock (the hidden #encsel stays the source of truth) ---- */
 const SHORT={'r50k_base':['GPT-2/3','50k'],'cl100k_base':['GPT-4','100k'],'o200k_base':['GPT-4o','200k'],'llama3.1':['Llama 3.1','128k'],'qwen3':['Qwen3','152k'],'deepseek-v3':['DeepSeek-V3','129k'],'gemma3':['Gemma 3','262k'],'mistral-v0.3':['Mistral v0.3','33k']};
-let busyEnc=null;
+let busyEnc=null; const sizes={};
+manifest().then(m=>{for(const o of $('#encsel').options){const e=o.value;sizes[e]=((m.files[e+'.json']||{}).size||0)+((m.files[e+'.merges.json']||{}).size||0);}return refreshSaved();}).then(()=>renderPickers());
 function chipHTML(o,first){
   const v=o.value;
   if(v==='__upload')return `<span class="gsep" aria-hidden="true"></span><button class="chip own" data-enc="__upload" title="Load a Hugging Face tokenizer.json from your computer. It stays in this tab and is never uploaded.">${Logos.svg('own:')}<span>Your tokenizer.json</span></button>`;
   const [nm,size]=SHORT[v]||[o.textContent.split(' · ')[0],o.textContent.split(' · ').pop().replace(' tokens','')];
   const sep=first?'<span class="gsep" aria-hidden="true"></span>':'';
-  return `${sep}<button class="chip${busyEnc===v?' busy':''}" role="radio" aria-checked="${v===curEnc}" data-enc="${v}" title="${o.textContent}">${Logos.svg(v)}<span>${nm}</span><span class="meta">${size}</span></button>`;
+  return `${sep}<button class="chip${busyEnc===v?' busy':''}" role="radio" aria-checked="${v===curEnc}" data-enc="${v}" title="${o.textContent}${saved.has(v)?' · saved on this device':sizes[v]?' · '+mb(sizes[v])+' download, kept on this device afterwards':''}">${Logos.svg(v)}<span>${nm}</span><span class="meta">${size}</span></button>`;
 }
 function renderPickers(){
   const groups=[...$('#encsel').querySelectorAll('optgroup')];
