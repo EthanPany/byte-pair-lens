@@ -51,6 +51,10 @@
   "r50k_base.json": {
    "size": 746637,
    "v": "4a69c5aeba1f"
+  },
+  "whole.json": {
+   "size": 232069,
+   "v": "8fbc77ce4ae3"
   }
  }
 }

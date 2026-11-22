@@ -31,11 +31,13 @@ cd scripts && node check_encoder.mjs      # bpe.js vs tiktoken, 3 tokenizers
 cd scripts && python3 check_hf.py [name]  # bpe.js vs Hugging Face tokenizers, 30 strings each
 cd scripts && node check_import.cjs        # hfimport.js (browser upload) == the Python build, all 5 HF vocabs
 cd scripts && python3 check_map.py [name] # bytemap.js vs an independent recount: 15 blocks, whole-Unicode overview, coverage.json
+cd scripts && node check_pack.cjs          # the worker route (BPE.pack -> unpack) gives the same vocabulary as BPE.load, all 8
 
 # Coverage tab data (rerun after changing vocabs or freq.json)
 cd scripts && uv run --with pyarrow --with fsspec --with aiohttp --with requests --with opencc python build_freq.py  # docs/freq.json from Wikipedia 20231101 (zh converted to Simplified)
 cd scripts && node build_coverage.cjs     # docs/coverage.json + docs/coverage.csv
 cd scripts && python3 build_blocks.py     # Unicode block list inside docs/bytemap.js
+cd scripts && node build_whole.cjs        # docs/whole.json: whole-token code points per tokenizer (rerun after changing vocabs; --check)
 
 # after changing ANY file in docs/ that the page loads: refresh hashes (the page fetches name?v=hash)
 cd scripts && python3 build_manifest.py   # --check exits 1 if stale; run it before merging
@@ -53,6 +55,8 @@ No bundler, linter or test framework. To test one tokenizer, pass its name. Add 
 - UI rules (from co-author feedback): Byte map is the first tab and opens on the whole-Unicode overview; no explanatory paragraphs on the page (use `title` tooltips, at most one short line per tab); no options that are not core (one cell size, computed from the width in `cellSize()`); footer is only Licenses + GitHub, the notices live in `docs/licenses.html`.
 - Loading: `Loader` in `index.html` blurs the page under a progress card while anything downloads or builds (`start/update/prep/end` per download, `hold/release` around rendering, `fail(msg, retry)`). Nothing should render half-ready or fail silently.
 - Background prefetch (`prefetchRest()`): after the first render, the other tokenizers are saved to Cache Storage one at a time, smallest first, at low priority. It waits while the foreground is loading, skips metered/slow connections and low storage, and only saves bytes (no build). `getData()` waits for an in-flight prefetch of the same file instead of downloading it twice.
+- First paint and switching: the byte map draws from `docs/whole.json` (bitmaps of whole-token code points, `bitsFor()`, `overviewLite()`, `blockLite()` in `index.html`), not from a vocabulary, so it is on screen before anything large is downloaded and redraws at once on a switch. `V` is `null` while the vocabulary for `curEnc` is still loading; anything that needs it must check. The Tokenize tab renders only while visible (`tokDirty`).
+- Vocabularies are built in a Web Worker: `bpe.js` doubles as the worker script (`new Worker(bpe.js)`), reads the file from Cache Storage, runs `BPE.pack()` and transfers flat tables; the page calls `BPE.unpack()`. Falls back to `BPE.load()` on the main thread when workers or Cache Storage are unavailable. `load(j, P)` shares all code after the byte tables, and `check_pack.cjs` must stay green.
 - Byte map detail is a floating card (`#detail`) that follows the pointer; click pins a character, Esc releases, Esc again returns to the overview. Characters with no glyph (control, format, space) draw as empty cells and say what they are in the card.
 - Coverage tab: the frequency-weighted "share of real text" metric was removed from the UI at a co-author's request (it is still in coverage.json/csv). `scripts/explore_han_sources.cjs` recounts it on other corpora.
 

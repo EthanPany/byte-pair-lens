@@ -373,7 +373,7 @@ footer a:hover{color:var(--fg)}
   <footer><a href="licenses.html">Licenses</a><a href="https://github.com/EthanPany/byte-pair-lens">GitHub</a></footer>
 </div>
 
-<script src="bpe.js?v=eafacd255ddf"></script>
+<script src="bpe.js?v=95626c6d4dff"></script>
 <script src="hfimport.js"></script>
 <script src="logos.js"></script>
 <script src="bytemap.js?v=7bdd791e8f06"></script>
@@ -381,7 +381,7 @@ footer a:hover{color:var(--fg)}
 (function(){
 const $=s=>document.querySelector(s);
 const TOKCOL=['t1','t2','t3','t4','t5'];
-const cache={}; let V=null, curEnc='cl100k_base';
+const cache={}; let V=null, curEnc='cl100k_base', booted=false, tokDirty=true;
 const encU=new TextEncoder();
 
 const hex=BPE.hex;
@@ -395,17 +395,18 @@ const Loader=(function(){
   const veil=$('#veil'), card=$('#veilcard');
   function paint(){
     if(failed)return;
-    if(!jobs.size&&!holds){clearTimeout(showT);showT=null;veil.dataset.on='0';return;}
-    const js=[...jobs.values()]; let got=0,total=0,prep=true;
+    const js=[...jobs.values()];
+    // a quiet job (a vocabulary loading behind an already drawn map) shows only while something waits on it
+    if(!holds&&!js.some(j=>!j.quiet)){clearTimeout(showT);showT=null;veil.dataset.on='0';return;} let got=0,total=0,prep=true;
     for(const j of js){total+=j.total;got+=Math.min(j.got,j.total);if(!j.prep)prep=false;}
     const local=js.length&&js.every(j=>j.local);
     if(js.length)$('#veilwhat').textContent=(local?'Opening ':'Loading ')+(js.length===1?js[0].label:`${js.length} tokenizers`);
     $('#veilfill').style.width=(js.length?(total?100*got/total:0):100).toFixed(1)+'%';
     $('#veilhow').textContent=local?'Saved on this device':!js.length||prep?'Preparing…':total&&got?`${mb(got)} of ${mb(total)}`:'';
-    if(veil.dataset.on!=='1'&&!showT)showT=setTimeout(()=>{showT=null;if(jobs.size||holds)veil.dataset.on='1';},150);
+    if(veil.dataset.on!=='1'&&!showT)showT=setTimeout(()=>{showT=null;if(holds||[...jobs.values()].some(j=>!j.quiet))veil.dataset.on='1';},150);
   }
   return {
-    start(id,label,total){const j=jobs.get(id)||{got:0};jobs.set(id,{...j,label,total:total||0});paint();},
+    start(id,label,total,quiet){const j=jobs.get(id)||{got:0};jobs.set(id,{...j,label,total:total||0,quiet:!!quiet});paint();},
     update(id,got){const j=jobs.get(id);if(j){j.got=got;paint();}},
     prep(id){const j=jobs.get(id);if(j){j.got=j.total;j.prep=true;paint();}},
     local(id){const j=jobs.get(id);if(j){j.local=true;j.got=j.total;paint();}},
@@ -438,11 +439,12 @@ function manifest(){
 }
 async function dataURL(name){const m=await manifest();const f=m.files[name];return f?`${name}?v=${f.v}`:name;}
 // fetch a data file, from Cache Storage when we have this version; onBytes(n) reports progress
-async function getData(name,onBytes){
+const CACHED=Symbol('cached'); // getData(..., true): the file is in Cache Storage, not parsed here
+async function getData(name,onBytes,ensureOnly){
   const url=await dataURL(name);
   if(prefetching[url])await prefetching[url]; // already on its way in the background: wait for it instead of downloading twice
   let store=null;
-  try{store=await caches.open(DATA_CACHE);const hit=await store.match(url);if(hit){onBytes&&onBytes(Infinity);return hit.json();}}catch(e){store=null;}
+  try{store=await caches.open(DATA_CACHE);const hit=await store.match(url);if(hit){onBytes&&onBytes(Infinity);return ensureOnly?CACHED:hit.json();}}catch(e){store=null;}
   const r=await fetch(url); if(!r.ok)throw new Error(name+': HTTP '+r.status);
   let body;
   if(onBytes&&r.body){ // count decompressed bytes as they arrive
@@ -450,13 +452,14 @@ async function getData(name,onBytes){
     for(;;){const {done,value}=await reader.read(); if(done)break; parts.push(value); n+=value.length; onBytes(n);}
     body=new Blob(parts,{type:'application/json'});
   }else body=await r.blob();
+  let kept=false;
   if(store){
     try{
-      await store.put(url,new Response(body,{headers:{'Content-Type':'application/json'}}));
+      await store.put(url,new Response(body,{headers:{'Content-Type':'application/json'}})); kept=true;
       for(const k of await store.keys()){const u=new URL(k.url);if(u.pathname.endsWith('/'+name)&&!k.url.endsWith(url))store.delete(k);} // drop older versions
     }catch(e){}
   }
-  return JSON.parse(await body.text());
+  return ensureOnly&&kept?CACHED:JSON.parse(await body.text());
 }
 // Tokenizers already saved on this device (Cache Storage). They open without a download.
 const saved=new Set();
@@ -509,27 +512,93 @@ async function prefetchRest(){
   }catch(e){}
 }
 // one in-flight promise per tokenizer, so the Tokenizer and Compare tabs never download twice
+/* Building a vocabulary (parsing megabytes of JSON, decoding every token) happens in a Web Worker: the
+   same bpe.js, loaded as a worker, reads the file from Cache Storage and sends back flat tables that
+   BPE.unpack() only has to index. Without workers or Cache Storage it is built here instead.
+   scripts/check_pack.cjs checks both routes give the same vocabulary. */
+const ready={}; // enc -> built vocabulary, once load(enc) has finished
+const bpeSrc=document.querySelector('script[src^="bpe.js"]').src;
+let worker=null, workerOff=!window.Worker, wid=0; const wjobs=new Map();
+function inWorker(msg){
+  return new Promise((res,rej)=>{
+    try{
+      if(!worker){
+        worker=new Worker(bpeSrc);
+        worker.onmessage=ev=>{const j=wjobs.get(ev.data.id);if(!j)return;wjobs.delete(ev.data.id);ev.data.error?j.rej(new Error(ev.data.error)):j.res(ev.data);};
+        worker.onerror=()=>{workerOff=true;for(const j of wjobs.values())j.rej(new Error('worker failed'));wjobs.clear();worker=null;};
+      }
+      const id=++wid; wjobs.set(id,{res,rej}); worker.postMessage({id,...msg});
+    }catch(e){workerOff=true;rej(e);}
+  });
+}
 function load(enc){
   if(!cache[enc])cache[enc]=loadNow(enc).catch(e=>{delete cache[enc];throw e;});
   return cache[enc];
 }
 async function loadNow(enc){
   const label=(SHORT[enc]||[([...$('#encsel').options].find(o=>o.value===enc)?.textContent||enc).split(' · ')[0]])[0];
-  Loader.start(enc,label,0);
+  Loader.start(enc,label,0,true);
   try{
     const m=await manifest();
     const files=[enc+'.json'], sp=m.files[enc+'.merges.json']; if(sp)files.push(enc+'.merges.json');
     const size=f=>(m.files[f]||{}).size||0, got={}, hit=new Set();
-    Loader.start(enc,label,files.reduce((a,f)=>a+size(f),0));
-    // vocabulary and merges download in parallel
-    const [j,merges]=await Promise.all(files.map(f=>getData(f,n=>{if(n===Infinity){hit.add(f);if(hit.size===files.length)Loader.local(enc);}got[f]=Math.min(n,size(f)||n);Loader.update(enc,files.reduce((a,x)=>a+(got[x]||0),0));})));
+    Loader.start(enc,label,files.reduce((a,f)=>a+size(f),0),true);
+    // vocabulary and merges download in parallel, straight into Cache Storage
+    const have=await Promise.all(files.map(f=>getData(f,n=>{if(n===Infinity){hit.add(f);if(hit.size===files.length)Loader.local(enc);}got[f]=Math.min(n,size(f)||n);Loader.update(enc,files.reduce((a,x)=>a+(got[x]||0),0));},true)));
     Loader.prep(enc);
-    await new Promise(r=>setTimeout(r,30)); // let the card paint before the synchronous build
-    const v=BPE.load(j);
-    if(v.kind==='sp')v.setMerges(merges);
-    saved.add(enc);
+    let v=null;
+    if(!workerOff&&have.every(x=>x===CACHED)){
+      try{
+        const abs=async f=>new URL(await dataURL(f),location.href).href;
+        const r=await inWorker({cacheName:DATA_CACHE,vocab:await abs(files[0]),merges:files[1]?await abs(files[1]):null});
+        v=BPE.unpack(r.P); if(r.merges)v.setMerges(r.merges);
+      }catch(e){v=null;}
+    }
+    if(!v){
+      const [j,merges]=await Promise.all(files.map((f,i)=>have[i]===CACHED?getData(f):have[i]));
+      await new Promise(r=>setTimeout(r,30)); // let the card paint before the synchronous build
+      v=BPE.load(j); if(v.kind==='sp')v.setMerges(merges);
+    }
+    if(v.kind==='sp')(window.requestIdleCallback||setTimeout)(()=>{void v.mergeRank;}); // index the merges when idle
+    saved.add(enc); ready[enc]=v;
     return v;
   }finally{Loader.end(enc);}
+}
+
+/* ---- Which characters are whole tokens ----
+   docs/whole.json (scripts/build_whole.cjs) lists, per shipped tokenizer, the code points that are one
+   whole token, and the assigned code points. The byte map draws from these bitmaps alone, so it is on
+   screen before a vocabulary is downloaded. A tokenizer that isn't in the file (your own upload, or the
+   file failed to load) gets its bitmap from the built vocabulary instead. */
+let WHOLE=null, ASSIGNED=null; const bitsCache={}, ovCache={};
+function expandRuns(r){const a=new Uint8Array(0x110000);for(let i=0;i<r.length;i+=2)a.fill(1,r[i],r[i]+r[i+1]);return a;}
+function assignedBits(){
+  if(ASSIGNED)return ASSIGNED;
+  if(WHOLE)return ASSIGNED=expandRuns(WHOLE.assigned);
+  ASSIGNED=new Uint8Array(0x110000);
+  for(let cp=0;cp<0x110000;cp++){if(cp>=0xD800&&cp<=0xDFFF)continue;if(!ByteMap.NONCHAR.test(String.fromCodePoint(cp)))ASSIGNED[cp]=1;}
+  return ASSIGNED;
+}
+function bitsFor(enc){
+  if(bitsCache[enc])return bitsCache[enc];
+  if(WHOLE&&WHOLE.whole[enc])return bitsCache[enc]=expandRuns(WHOLE.whole[enc]);
+  const v=ready[enc]; if(!v)return null;
+  const keys=ByteMap.vocabKeys(v), A=assignedBits(), b=new Uint8Array(0x110000);
+  for(let cp=0;cp<0x110000;cp++){if(!A[cp])continue;const u=encU.encode(String.fromCodePoint(cp));if(keys.has(BPE.key(u,0,u.length)))b[cp]=1;}
+  return bitsCache[enc]=b;
+}
+function overviewLite(enc){
+  if(ovCache[enc])return ovCache[enc];
+  const B=bitsFor(enc), A=assignedBits(), n=0x110000>>6, assigned=new Uint8Array(n), whole=new Uint8Array(n);
+  let totA=0, totW=0;
+  for(let g=0;g<n;g++){let a=0,w=0;for(let cp=g<<6,e=cp+64;cp<e;cp++){a+=A[cp];w+=B[cp];}assigned[g]=a;whole[g]=w;totA+=a;totW+=w;}
+  return ovCache[enc]={assigned,whole,totA,totW};
+}
+function blockLite(enc,blk){
+  const B=bitsFor(enc), A=assignedBits(), r0=blk.lo>>6, rows=(blk.hi>>6)-r0+1, state=new Uint8Array(rows*64); // 0 empty, 1 whole, 2 split
+  let assigned=0, whole=0;
+  for(let cp=blk.lo;cp<=blk.hi;cp++){if(!A[cp])continue;assigned++;whole+=B[cp];state[cp-(r0<<6)]=B[cp]?1:2;}
+  return {r0,rows,state,assigned,whole};
 }
 const encode=str=>V.encode(str);
 
@@ -577,6 +646,7 @@ function renderBars(){
 
 let page=0; const PAGE=50;
 function renderTable(){
+  if(!V)return;
   const q=$('#q').value, cat=+$('#catsel').value, sort=$('#sort').value;
   let ids=[];
   for(let i=0;i<V.cat.length;i++){if(cat>=0&&V.cat[i]!==cat)continue;if(q&&(V.text[i]===null||!V.text[i].includes(q)))continue;ids.push(i);}
@@ -593,7 +663,7 @@ function renderTable(){
    Row = every UTF-8 byte of a character except the last; column = the last byte (80–BF).
    For multi-byte characters that is exactly cp>>6 (row) and cp&63 (column), for any length.
    One cell size for both views, chosen so the 64 columns fill the width. */
-const BLOCK=ByteMap.BLOCK, vocabKeys=()=>ByteMap.vocabKeys(V), rowPrefix=ByteMap.rowPrefix, isTextToken=ByteMap.isTextToken, blockData=blk=>ByteMap.blockData(V,blk);
+const BLOCK=ByteMap.BLOCK, vocabKeys=()=>ByteMap.vocabKeys(V), rowPrefix=ByteMap.rowPrefix, isTextToken=ByteMap.isTextToken;
 const U=cp=>'U+'+cp.toString(16).toUpperCase().padStart(4,'0');
 const encName=()=>(SHORT[curEnc]||[($('#encsel').selectedOptions[0]?.textContent||curEnc).split(' · ')[0]])[0];
 const pct=(w,a)=>{if(!a)return '–';const v=100*w/a;return (v>0&&v<1?v.toFixed(2):v.toFixed(1))+'%';};
@@ -601,7 +671,7 @@ const pct=(w,a)=>{if(!a)return '–';const v=100*w/a;return (v>0&&v<1?v.toFixed(
   const opt=b=>`<option value="${b.id}">${b.name}</option>`;
   $('#blocksel').innerHTML='<option value="overview">All of Unicode</option>'+ByteMap.FEATURED.map(opt).join('')+ByteMap.ALL.map(opt).join('');
 })();
-let mapInfo=null, pinned=null, hlBlock=null;
+let mapInfo=null, pinned=null, hlBlock=null, lastCp=null;
 const LABELW=64, GAP=1;
 function cssVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
 function cellSize(block){const w=$('#mapscroll').clientWidth-(block?16:0);return Math.max(13,Math.min(22,Math.floor((w-LABELW-2)/64)-GAP));}
@@ -633,7 +703,7 @@ function overviewRows(O){
   return rows;
 }
 function drawOverview(){
-  const O=ByteMap.overviewData(V), rows=overviewRows(O);
+  const O=overviewLite(curEnc), rows=overviewRows(O);
   const cell=cellSize(false), sepH=26, gapH=14;
   let H=0; rows.forEach(r=>{r.y=H;H+=r.kind==='row'?cell+GAP:r.kind==='sep'?sepH:gapH;}); H+=2;
   const W=LABELW+64*(cell+GAP)+1, ctx=sizeCanvas(W,H);
@@ -740,10 +810,10 @@ document.addEventListener('keydown',e=>{
 });
 
 function drawMap(){
-  if(!V||$('#pane-map').hidden)return;
+  if($('#pane-map').hidden||!bitsFor(curEnc))return;
   updateMapNav();
   if($('#blocksel').value==='overview'){drawOverview();return;}
-  const blk=BLOCK[$('#blocksel').value]; const D=blockData(blk);
+  const blk=BLOCK[$('#blocksel').value]; const D=blockLite(curEnc,blk);
   const cell=cellSize(true), headH=18;
   const W=LABELW+64*(cell+GAP)+1, H=headH+D.rows*(cell+GAP)+1, ctx=sizeCanvas(W,H);
   const cFg=cssVar('--fg'), cLine=cssVar('--line'), cMuted=cssVar('--muted'), cBg=cssVar('--bg'), cAcc=cssVar('--whole'), cSplit=cssVar('--split'), mono=cssVar('--mono'), sans=cssVar('--sans');
@@ -770,7 +840,7 @@ function drawMap(){
     }
   }
   ctx.textAlign='left';
-  $('#mapstats').innerHTML=`<span class="big">${pct(D.whole,D.assigned)}</span><span class="say">of <b>${blk.name}</b> is one whole token in <b>${esc(encName())}</b></span><span class="more">${D.whole.toLocaleString()} of ${D.assigned.toLocaleString()} characters · ${U(blk.lo)}–${blk.hi.toString(16).toUpperCase()} · <b>${(D.tok/Math.max(1,D.assigned)).toFixed(2)}</b> tokens per character</span>`;
+  $('#mapstats').innerHTML=`<span class="big">${pct(D.whole,D.assigned)}</span><span class="say">of <b>${blk.name}</b> is one whole token in <b>${esc(encName())}</b></span><span class="more">${D.whole.toLocaleString()} of ${D.assigned.toLocaleString()} characters · ${U(blk.lo)}–${blk.hi.toString(16).toUpperCase()}</span>`;
   mapInfo={blk,D,cell,headH};
 }
 function cellAt(ev){
@@ -780,7 +850,12 @@ function cellAt(ev){
   if(c<0||c>63||row<0||row>=D.rows||!D.state[row*64+c])return null; return ((D.r0+row)<<6)|c;
 }
 function showDetail(cp){
-  const ch=String.fromCodePoint(cp), b=encU.encode(ch);
+  const ch=String.fromCodePoint(cp), b=encU.encode(ch); lastCp=cp;
+  if(!V){ // the vocabulary is still on its way: say what the bitmap knows, the pieces follow
+    const w=bitsFor(curEnc)[cp], k=KIND(ch);
+    $('#detail').innerHTML=(k?`<div class="big kind">${k}</div>`:`<div class="big">${MARK.test(ch)?'◌':''}${esc(ch)}</div>`)+`<dl><dt>Code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)}</dd><dt>Tokens</dt><dd class="plain">${w?'1, whole':'<span class="inv">split</span>'}</dd><dt>Pieces</dt><dd class="plain">…</dd></dl>`;
+    $('#detail').classList.toggle('pinned',pinned!==null); return;
+  }
   const ids=V.splitChar(ch), whole=ids.length===1&&V.bytes[ids[0]].length===b.length;
   const split=ids.map(id=>{const t=V.text[id];return `<span class="${t===null?'frag':''}">${t===null?hex(V.bytes[id]):esc(t)}</span>`}).join('');
   const pre=b.subarray(0,b.length-1), pk=BPE.key(pre,0,pre.length);
@@ -866,6 +941,7 @@ function drawCovChart(C,F){
   ctx.fillStyle=cAcc; ctx.beginPath(); ctx.arc(ptsW[ptsW.length-1][0],ptsW[ptsW.length-1][1],3.5,0,7); ctx.fill();
 }
 function renderCovDetail(){
+  if(!V)return;
   const blk=ByteMap.BLOCK[covScript], F=FREQ.scripts[covScript];
   $('#covscript').value=covScript;
   $('#covchips').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.b===covScript)));
@@ -894,7 +970,7 @@ $('#covtable').addEventListener('click',e=>{
 });
 $('#covchips').addEventListener('click',e=>{const b=e.target.closest('button[data-b]');if(!b)return;covScript=b.dataset.b;renderCovTable();renderCovDetail();writeHash();});
 $('#covcsv').addEventListener('click',async()=>{const a=document.createElement('a');a.href=await dataURL('coverage.csv');a.download='byte-pair-lens-coverage.csv';document.body.append(a);a.click();a.remove();});
-window.addEventListener('resize',()=>{if(!$('#pane-cov').hidden&&COV&&FREQ.scripts[covScript])drawCovChart(ByteMap.coverage(V,ByteMap.BLOCK[covScript],FREQ.scripts[covScript]),FREQ.scripts[covScript]);});
+window.addEventListener('resize',()=>{if(V&&!$('#pane-cov').hidden&&COV&&FREQ.scripts[covScript])drawCovChart(ByteMap.coverage(V,ByteMap.BLOCK[covScript],FREQ.scripts[covScript]),FREQ.scripts[covScript]);});
 
 /* ---- Merge tree (vocab browser) ---- */
 function treeLabel(id){const t=V.text[id];return t===null?hex(V.bytes[id]):t.replace(/\n/g,'⏎').replace(/\t/g,'⇥').replace(/ /g,'␣');}
@@ -936,7 +1012,7 @@ function renderPickers(){
 }
 function pickEnc(v){
   if(v==='__upload'){$('#ownfile').click();return;}
-  if(v===curEnc)return;
+  if(v===curEnc&&V)return;
   busyEnc=v; renderPickers();
   $('#loadstatus').textContent='';
   switchEnc(v).catch(err=>Loader.fail(err.message,()=>pickEnc(v))).finally(()=>{busyEnc=null;renderPickers();});
@@ -960,7 +1036,7 @@ $('#ownfile').addEventListener('change',async e=>{
     const name='own:'+f.name.replace(/\.json$/i,''), label=f.name.replace(/\.json$/i,'');
     const {vocab,merges}=HFImport.convert(j,name,label+' (your file)');
     const v=BPE.load(vocab); if(merges)v.setMerges(merges);
-    cache[name]=Promise.resolve(v);
+    cache[name]=Promise.resolve(v); ready[name]=v;
     if(![...$('#encsel').options].some(o=>o.value===name)){
       const o=document.createElement('option'); o.value=name; o.textContent=`${label} (your file) · ${Math.round(v.bytes.length/1000)}k tokens`;
       $('#owngroup').insertBefore(o,$('#owngroup').lastElementChild);
@@ -982,7 +1058,8 @@ async function renderCompare(){
   const text=$('#cmpinput').value, nchars=[...text].length, job=++cmpBusy;
   const rows=$('#cmprows');
   rows.innerHTML=cmpSel.map(e=>`<div class="cmprow" data-enc="${e}"><div class="cmphead"><span class="nm">${encOptions().find(o=>o.enc===e)?.label||e}</span><span class="loading">loading…</span></div></div>`).join('');
-  const loaded=await Promise.all(cmpSel.map(e=>load(e).then(Vx=>({e,Vx}),err=>({e,err:err.message}))));
+  Loader.hold();
+  let loaded; try{loaded=await Promise.all(cmpSel.map(e=>load(e).then(Vx=>({e,Vx}),err=>({e,err:err.message}))));}finally{Loader.release();}
   if(job!==cmpBusy)return; // a newer render started
   const res=loaded.map(r=>{if(r.err)return r;const ids=r.Vx.encode(text);return {...r,ids,frags:ids.filter(id=>r.Vx.text[id]===null).length};});
   const min=Math.min(...res.filter(r=>r.ids).map(r=>r.ids.length||1));
@@ -1008,9 +1085,13 @@ function currentTab(){return TABS.find(t=>!$('#pane-'+t).hidden)||'map';}
 function showTab(id,noHash){
   for(const t of TABS){$('#pane-'+t).hidden=t!==id;$('#tab-'+t).setAttribute('aria-selected',String(t===id));}
   if(id==='map')drawMap(); else{$('#detail').hidden=true;}
+  if(booted&&id!=='map'&&id!=='cmp'&&!V){ // this tab needs the vocabulary that is still loading behind the map
+    Loader.hold(); load(curEnc).catch(()=>{}).then(()=>setTimeout(()=>Loader.release(),60));
+  }
+  if(id==='tok'&&V&&tokDirty)renderTok();
   if(id==='cov')renderCoverage();
   if(id==='cmp')renderCompare();
-  if(V&&!noHash)writeHash();
+  if(!noHash)writeHash();
 }
 for(const t of TABS)$('#tab-'+t).onclick=()=>showTab(t);
 {const h=readHash(); if(h.block&&(BLOCK[h.block]||h.block==='overview'))$('#blocksel').value=h.block; if(h.cp&&/^[0-9A-F]+$/i.test(h.cp))pinned=parseInt(h.cp,16); if(h.script)covScript=h.script; if(h.cmp){const ok=h.cmp.split(',').filter(e=>[...$('#encsel').options].some(o=>o.value===e)).slice(0,4);if(ok.length)cmpSel=ok;} if(TABS.includes(h.tab))showTab(h.tab,true);}
@@ -1018,17 +1099,31 @@ for(const t of TABS)$('#tab-'+t).onclick=()=>showTab(t);
 // URL state: #enc=qwen3&tab=map (a bare #map still opens the map)
 function readHash(){const h={};for(const kv of location.hash.slice(1).split('&')){if(!kv)continue;const [k,v]=kv.split('=');h[k]=v===undefined?'':decodeURIComponent(v);}if('map' in h)h.tab='map';return h;}
 function writeHash(){const tab=currentTab();let h='#enc='+curEnc;if(tab==='tok')h+='&tab=tok';if(tab==='map'){h+='&tab=map&block='+$('#blocksel').value;if(pinned!==null)h+='&cp='+pinned.toString(16).toUpperCase();}if(tab==='cov')h+='&tab=cov&script='+covScript;if(tab==='cmp')h+='&tab=cmp&cmp='+cmpSel.join(',');history.replaceState(null,'','#'+h.slice(1));}
+/* Switching tokenizer: the map redraws at once from the bitmap; the vocabulary follows from the worker
+   and fills in everything that needs it. The veil only comes up when the visible tab can't show
+   anything without the vocabulary. */
+let switchSeq=0;
+function showPinned(){if(pinned!==null&&!$('#pane-map').hidden&&mapInfo&&!mapInfo.overview){showDetail(pinned);placeCard();}}
+// the Tokenize tab is only rendered while it is the one on screen (tokDirty)
+function renderTok(){render(); renderBars(); page=0; renderTable(); $('#tree').hidden=true; tokDirty=false;}
+function renderV(){
+  if($('#pane-tok').hidden)tokDirty=true; else renderTok();
+  if(!$('#detail').hidden&&!$('#pane-map').hidden&&mapInfo&&!mapInfo.overview&&lastCp!==null)showDetail(lastCp);
+}
 async function switchEnc(enc){
-  $('#encsel').value=enc; Loader.hold();
+  const seq=++switchSeq; booted=true; curEnc=enc; V=ready[enc]||null; $('#encsel').value=enc; renderPickers();
+  const lite=!!bitsFor(enc);
+  if(lite){drawMap();showPinned();}
+  writeHash();
+  const blocking=!V&&(!lite||currentTab()!=='map'); if(blocking)Loader.hold();
   try{
-    V=await load(enc); curEnc=enc; $('#encsel').value=curEnc;
-    renderPickers(); render(); renderBars(); page=0; renderTable(); $('#tree').hidden=true; drawMap();
-    if(pinned!==null&&!$('#pane-map').hidden&&mapInfo&&!mapInfo.overview){showDetail(pinned);placeCard();}
+    if(!V){const v=await load(enc); if(seq!==switchSeq)return; V=v;}
+    if(!lite){drawMap();showPinned();}
+    renderV();
     if(!$('#pane-cov').hidden)await renderCoverage();
     if(!$('#pane-cmp').hidden)renderCompare();
-    writeHash();
-    await new Promise(r=>requestAnimationFrame(()=>setTimeout(r)));
-  }finally{$('#encsel').value=curEnc; Loader.release();}
+    if(blocking)await new Promise(r=>requestAnimationFrame(()=>setTimeout(r)));
+  }finally{if(blocking)Loader.release();}
 }
 $('#input').addEventListener('input',render);
 $('#samples').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;$('#input').value=b.dataset.s;render();});
@@ -1040,11 +1135,17 @@ $('#prev').onclick=()=>{page--;renderTable();};
 $('#next').onclick=()=>{page++;renderTable();};
 renderPickers();
 const H=readHash(); const startEnc=[...$('#encsel').options].some(o=>o.value===H.enc)?H.enc:'cl100k_base';
-// show nothing until the vocabulary and the fonts are here
+// First paint: the bitmaps (one small file) and the fonts. The vocabulary loads behind the drawn map.
 (function boot(){
   Loader.hold();
   const fonts=document.fonts&&document.fonts.ready?Promise.race([document.fonts.ready,new Promise(r=>setTimeout(r,1500))]):Promise.resolve();
-  Promise.all([switchEnc(startEnc),fonts]).then(()=>{drawMap();Loader.release();setTimeout(prefetchRest,1200);},e=>Loader.fail(e.message,()=>{Loader.release();boot();}));
+  const start=()=>{const p=switchEnc(startEnc);p.then(()=>setTimeout(prefetchRest,1200),e=>Loader.fail(e.message,start));return p;};
+  getData('whole.json').then(w=>{WHOLE=w;},()=>{}).then(async()=>{
+    const p=start();
+    await fonts;
+    if(!(bitsFor(startEnc)&&currentTab()==='map'))await p.catch(()=>{}); // no bitmap, or a tab that needs the vocabulary: wait for it
+    drawMap(); Loader.release();
+  });
 })();
 })();
 </script>
