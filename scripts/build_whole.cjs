@@ -4,7 +4,9 @@
 
    Usage:  node build_whole.cjs           (rerun after changing any vocabulary, then build_manifest.py)
            node build_whole.cjs --check   (exit 1 if docs/whole.json is stale)
-   Format: {assigned:[start,len,...], whole:{enc:[start,len,...]}}: runs of consecutive code points. */
+   Format: {assigned:[start,len,...], whole:{enc:[start,len,...]}, frag:{enc:[start,len,...]}}.
+   assigned/whole are runs of consecutive code points. frag is runs of consecutive rows (code point >> 6)
+   whose shared UTF-8 prefix is itself a fragment token: the red row marks of the Detailed view. */
 const fs = require('fs'), path = require('path');
 const DOCS = path.join(__dirname, '..', 'docs');
 const BPE = require(path.join(DOCS, 'bpe.js')); globalThis.BPE = BPE;
@@ -22,15 +24,28 @@ function runs(test) {
   return out;
 }
 const isAssigned = cp => !ByteMap.NONCHAR.test(String.fromCodePoint(cp));
-const out = { assigned: runs(isAssigned), whole: {} };
+const out = { assigned: runs(isAssigned), whole: {}, frag: {} };
+function rowRuns(test) {
+  const out = [], n = 0x110000 >> 6; let start = -1;
+  for (let g = 0; g <= n; g++) {
+    const on = g >= 2 && g < n && !(g >= 0xD800 >> 6 && g <= 0xDFFF >> 6) && test(g);
+    if (on && start < 0) start = g;
+    if (!on && start >= 0) { out.push(start, g - start); start = -1; }
+  }
+  return out;
+}
 const count = r => { let n = 0; for (let i = 1; i < r.length; i += 2) n += r[i]; return n; };
 for (const e of ENC) {
   const V = BPE.load(JSON.parse(fs.readFileSync(path.join(DOCS, e + '.json'), 'utf8')));
   const keys = ByteMap.vocabKeys(V);
   out.whole[e] = runs(cp => { if (!isAssigned(cp)) return false; const b = utf8.encode(String.fromCodePoint(cp)); return keys.has(BPE.key(b, 0, b.length)); });
+  out.frag[e] = rowRuns(g => ByteMap.isFragmentPrefix(V, ByteMap.rowPrefix(g << 6)));
   const O = ByteMap.overviewData(V);
+  // the same rows bytemap.js marks, checked on the Han block
+  const H = ByteMap.blockData(V, ByteMap.BLOCK.han), fr = new Set(); for (let i = 0; i < out.frag[e].length; i += 2) for (let k = 0; k < out.frag[e][i + 1]; k++) fr.add(out.frag[e][i] + k);
+  for (let r = 0; r < H.rows; r++) if (!!H.fragRow[r] !== fr.has(H.r0 + r)) { console.error(`${e}: fragment row mismatch at row ${r}`); process.exit(1); }
   if (count(out.whole[e]) !== O.totW || count(out.assigned) !== O.totA) { console.error(`${e}: mismatch with bytemap.js overview (${count(out.whole[e])} vs ${O.totW})`); process.exit(1); }
-  console.log(`${e}: ${O.totW.toLocaleString()} of ${O.totA.toLocaleString()} whole, ${out.whole[e].length / 2} runs`);
+  console.log(`${e}: ${O.totW.toLocaleString()} of ${O.totA.toLocaleString()} whole, ${out.whole[e].length / 2} runs, ${count(out.frag[e])} fragment-prefix rows`);
 }
 const text = JSON.stringify(out), file = path.join(DOCS, 'whole.json');
 if (process.argv.includes('--check')) {
