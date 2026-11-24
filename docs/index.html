@@ -27,7 +27,8 @@
   --bg:#ffffff;--fg:#111111;--muted:#5c5c5c;--line:#d9d9d9;--tint:#f3f3f3;
   --tok-1:#dbe7fd;--tok-2:#d9f2e1;--tok-3:#fcefc7;--tok-4:#fbe0ec;--tok-5:#e8e2fb;--tok-edge:rgba(17,17,17,.14);
   --frag:#d6400f;--frag-ink:#ffffff;--whole:#2f5fd8;--split:#dcdcdc;
-  --sans:"IBM Plex Sans","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC",system-ui,"Helvetica Neue",Arial,sans-serif;
+  --sans-base:"IBM Plex Sans","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC",system-ui,"Helvetica Neue",Arial,sans-serif;
+  --sans:"IBM Plex Sans","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC",system-ui,"Helvetica Neue",Arial,sans-serif,"BPL Fallback";
   --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;--cjk:var(--sans);
   --h:34px; /* one control height everywhere */
   color-scheme:light;
@@ -168,6 +169,8 @@ td.hex,td.num,.mono{font-family:var(--mono);font-size:.82rem}
 .detail .big{font-size:3.4rem;line-height:1.1;text-align:center;padding:4px 0 10px;border-bottom:1px solid var(--line);overflow:hidden}
 .detail .big.sm{font-size:1.5rem;letter-spacing:.12em;padding:10px 0 12px}
 .detail .big.kind{font-size:.95rem;color:var(--muted);padding:18px 0}
+.nog{display:inline-block;vertical-align:middle;font:500 .34em/1.2 var(--mono);letter-spacing:.04em;color:var(--muted);border:1px dashed var(--muted);padding:.3em .45em;margin:0 .15em;text-align:center}
+.detail .big.sm .nog{font-size:.5em}
 .detail dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0}
 .detail dt{color:var(--muted)}.detail dd{margin:0;overflow-wrap:anywhere;font-family:var(--mono);font-size:.8rem;align-self:center}
 .detail dd.plain{font-family:var(--sans);font-size:.86rem}
@@ -712,6 +715,69 @@ function sizeCanvas(W,H){
   cv.width=Math.floor(W*dpr); cv.height=Math.floor(H*dpr); cv.style.width=W+'px'; cv.style.height=H+'px';
   const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr); return ctx;
 }
+/* Fallback fonts. Outside Latin the page relies on system fonts, and no system has all of Unicode: where one
+   has no glyph the map showed boxes. docs/fallback.json lists small font slices (scripts/build_fallback.py);
+   a slice is registered, and so downloaded, only when this machine cannot draw a character it covers.
+   A character that no slice covers either is drawn as its code point (`nog`), never as a box. */
+const Fallback=(function(){
+  const FAM='BPL Fallback';
+  let idx=null, table=null, mode='probe', base='', tofu=null;
+  const faces=[], glyph=new Map();
+  const pc=document.createElement('canvas'); pc.width=pc.height=24;
+  const px=pc.getContext('2d',{willReadFrequently:true});
+  function sig(ch){ // what the system fonts draw for ch, as a hash of the pixels
+    px.clearRect(0,0,24,24); px.font='16px '+base; px.textBaseline='top'; px.fillText(ch,2,2);
+    const d=px.getImageData(0,0,24,24).data; let h=0,n=0;
+    for(let i=3;i<d.length;i+=4)if(d[i]){n++;h=(Math.imul(h,31)+i*d[i])>>>0;}
+    return n?n+':'+h:'';
+  }
+  function hasGlyph(cp){ // null when this browser gives no way to tell
+    if(mode!=='probe')return null;
+    let g=glyph.get(cp); if(g===undefined){g=!tofu.has(sig(String.fromCodePoint(cp)));glyph.set(cp,g);} return g;
+  }
+  function register(k){
+    if(faces[k])return faces[k];
+    const s=idx[k], r=[]; for(let i=0;i<s.r.length;i+=2){const a=s.r[i],b=a+s.r[i+1]-1;r.push('U+'+a.toString(16)+(b>a?'-'+b.toString(16):''));}
+    const f=new FontFace(FAM,`url(fonts/fb/${s.f}?v=${s.v}) format("woff2")`,{unicodeRange:r.join(','),display:'swap'});
+    document.fonts.add(f); return faces[k]=f;
+  }
+  function init(j){
+    idx=j.slices; table=new Uint16Array(0x110000);
+    idx.forEach((s,k)=>{for(let i=0;i<s.r.length;i+=2)for(let cp=s.r[i],e=cp+s.r[i+1];cp<e;cp++)if(!table[cp])table[cp]=k+1;});
+    base=cssVar('--sans-base');
+    // unassigned code points: every one must draw as the same box, or (Firefox draws the digits) boxes cannot be told apart
+    const boxes=[0x378,0x530,0x2FE0,0x1FFF,0x3FFFD].map(cp=>sig(String.fromCodePoint(cp))).filter(Boolean);
+    tofu=new Set(boxes); if(tofu.size!==1){mode='all';idx.forEach((s,k)=>register(k));}
+  }
+  // make the characters drawable; resolves to true when a font arrived that was not there before
+  function need(cps){
+    if(!idx)return Promise.resolve(false);
+    const load=new Set();
+    for(const cp of cps){
+      const k=table[cp]; if(!k)continue;
+      if(!faces[k-1]){if(hasGlyph(cp)!==false)continue;register(k-1);}
+      if(faces[k-1].status==='unloaded')load.add(faces[k-1]);
+    }
+    if(!load.size)return Promise.resolve(false);
+    return Promise.all([...load].map(f=>f.load().then(()=>1,()=>0))).then(r=>r.some(Boolean));
+  }
+  const cpsOf=str=>{const a=[];for(const ch of str){const cp=ch.codePointAt(0);if(cp>=0x250)a.push(cp);if(a.length>4000)break;}return a;};
+  // no system font and no slice (or the slice failed): the caller draws the code point instead
+  function missing(cp){
+    if(!idx||mode!=='probe')return false;
+    const k=table[cp]; if(k&&!(faces[k-1]&&faces[k-1].status==='error'))return false;
+    return hasGlyph(cp)===false;
+  }
+  const nog=cp=>{const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2);return `<span class="nog" title="No font has this character yet">${h.slice(0,m)}<br>${h.slice(m)}</span>`;};
+  // text placed in the page by any tab: look at what was added and fetch what it needs
+  let pend=null; const seen=new Set();
+  function watch(root){
+    new MutationObserver(ms=>{for(const m of ms)seen.add(m.target.nodeType===1?m.target:m.target.parentNode);
+      if(!pend)pend=setTimeout(()=>{pend=null;const els=[...seen];seen.clear();for(const el of els)if(el&&el.isConnected)need(cpsOf(el.textContent||''));},120);
+    }).observe(root,{childList:true,subtree:true,characterData:true});
+  }
+  return {init,need,missing,nog,watch,cpsOf,get on(){return !!idx;}};
+})();
 // characters with nothing to draw: say what they are instead of showing a missing-glyph box
 const KIND=ch=>/^\p{Cc}$/u.test(ch)?'control character':/^\p{Cf}$/u.test(ch)?'format character':/^[\p{Zs}\p{Zl}\p{Zp}]$/u.test(ch)?'space':null;
 const MARK=/^\p{M}$/u;
@@ -804,8 +870,11 @@ function hideCard(){if(pinned===null&&!isSide())$('#detail').hidden=true;}
 function unpin(){pinned=null;$('#detail').classList.remove('pinned');$('#detail').hidden=true;drawMap();if(isSide()&&lastCp!==null)showDetail(lastCp);writeHash();}
 function showGroup(g){
   const O=mapInfo.O, lo=g<<6, hi=lo+63, blk=ByteMap.blockOf(lo);
-  const sample=[];for(let cp=lo;cp<=hi&&sample.length<8;cp++){const ch=String.fromCodePoint(cp);if(!ByteMap.NONCHAR.test(ch)&&!KIND(ch))sample.push((MARK.test(ch)?'◌':'')+ch);}
-  $('#detail').innerHTML=`<div class="big sm">${esc(sample.join(''))}</div><dl><dt>Block</dt><dd class="plain">${blk?blk.name:'–'}</dd><dt>Range</dt><dd>${U(lo)}–${hi.toString(16).toUpperCase()}</dd><dt>Whole tokens</dt><dd>${O.whole[g]} of ${O.assigned[g]}</dd></dl><div class="foot">Click to zoom in</div>`;
+  const A=assignedBits(), sample=[];
+  for(let cp=lo;cp<=hi&&sample.length<8;cp++){const ch=String.fromCodePoint(cp);if(A[cp]&&!ByteMap.NONCHAR.test(ch)&&!KIND(ch))sample.push(Fallback.missing(cp)?Fallback.nog(cp):esc((MARK.test(ch)?'◌':'')+ch));}
+  let n=0;for(let cp=lo;cp<=hi;cp++)if(A[cp]&&Fallback.missing(cp))n++;
+  const head=n&&n>=O.assigned[g]?'<div class="big kind">no font has these characters yet</div>':`<div class="big sm">${sample.join('')}</div>`;
+  $('#detail').innerHTML=`${head}<dl><dt>Block</dt><dd class="plain">${blk?blk.name:'–'}</dd><dt>Range</dt><dd>${U(lo)}–${hi.toString(16).toUpperCase()}</dd><dt>Whole tokens</dt><dd>${O.whole[g]} of ${O.assigned[g]}</dd></dl><div class="foot">Click to zoom in</div>`;
 }
 function openGroup(g){
   const blk=ByteMap.blockOf(g<<6); if(!blk)return;
@@ -876,8 +945,10 @@ function drawMap(){
     const y=headH+r*(cell+GAP);
     for(let c=0;c<64;c++){
       const st=D.state[r*64+c]; if(!st)continue;
-      const ch=String.fromCodePoint(((D.r0+r)<<6)|c); if(KIND(ch))continue;
-      ctx.fillStyle=st===1?cBg:cFg; ctx.fillText(MARK.test(ch)?'◌'+ch:ch,LABELW+c*(cell+GAP)+cell/2,y+cell/2+1,cell);
+      const cp=((D.r0+r)<<6)|c, ch=String.fromCodePoint(cp); if(KIND(ch))continue;
+      ctx.fillStyle=st===1?cBg:cFg;
+      if(Fallback.missing(cp)){const q=Math.max(2,Math.round(cell/7));ctx.globalAlpha=.45;ctx.fillRect(LABELW+c*(cell+GAP)+cell/2-q/2,y+cell/2-q/2,q,q);ctx.globalAlpha=1;continue;} // no font anywhere: a dot, the card gives the code point
+      ctx.fillText(MARK.test(ch)?'◌'+ch:ch,LABELW+c*(cell+GAP)+cell/2,y+cell/2+1,cell);
     }
   }
   ctx.textAlign='left';
@@ -886,14 +957,32 @@ function drawMap(){
   }
   $('#mapstats').innerHTML=`<span class="big">${pct(D.whole,D.assigned)}</span><span class="say">of <b>${blk.name}</b> is one whole token in <b>${esc(encName())}</b></span><span class="more">${D.whole.toLocaleString()} of ${D.assigned.toLocaleString()} characters · ${U(blk.lo)}–${blk.hi.toString(16).toUpperCase()}</span>`;
   mapInfo={blk,D,cell,headH,F};
+  fbView();
   if(side){const d=$('#detail');if(d.hidden||!d.innerHTML){d.innerHTML='<p class="sub">Hover or tap a cell.</p>';d.classList.remove('pinned');}d.hidden=false;d.style.left=d.style.top='';}
 }
+// make sure the rows on screen have fonts; the canvas is drawn again as each one arrives
+let fbT=null, fbDraw=null;
+if(document.fonts&&document.fonts.addEventListener)document.fonts.addEventListener('loadingdone',e=>{
+  if(!(e.fontfaces||[]).some(f=>/BPL Fallback/.test(f.family))||!mapInfo||mapInfo.overview)return;
+  clearTimeout(fbDraw); fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);
+});
+function fbView(){
+  if(!Fallback.on||!mapInfo||mapInfo.overview)return;
+  const {D,cell,headH}=mapInfo, r=$('#map').getBoundingClientRect(), box=$('#mapscroll').getBoundingClientRect();
+  const top=Math.max(0,box.top,0)-r.top, bot=Math.min(innerHeight,box.bottom)-r.top;
+  const r0=Math.max(0,Math.floor((top-headH)/(cell+GAP))-2), r1=Math.min(D.rows-1,Math.ceil((bot-headH)/(cell+GAP))+2), cps=[];
+  for(let row=r0;row<=r1;row++)for(let c=0;c<64;c++)if(D.state[row*64+c])cps.push(((D.r0+row)<<6)|c);
+  Fallback.need(cps);
+}
+const fbScroll=()=>{clearTimeout(fbT);fbT=setTimeout(fbView,150);};
+window.addEventListener('scroll',fbScroll,{passive:true}); $('#mapscroll').addEventListener('scroll',fbScroll,{passive:true});
 function cellAt(ev){
   if(!mapInfo||mapInfo.overview)return null; const {D,cell,headH}=mapInfo;
   const r=$('#map').getBoundingClientRect(); const x=ev.clientX-r.left-LABELW, y=ev.clientY-r.top-headH;
   if(x<0||y<0)return null; const c=Math.floor(x/(cell+GAP)), row=Math.floor(y/(cell+GAP));
   if(c<0||c>63||row<0||row>=D.rows||!D.state[row*64+c])return null; return ((D.r0+row)<<6)|c;
 }
+const bigGlyph=(cp,ch)=>`<div class="big">${Fallback.missing(cp)?Fallback.nog(cp):(MARK.test(ch)?'◌':'')+esc(ch)}</div>`;
 function showDetailSide(cp){ // the fields of the paper's figure
   const ch=String.fromCodePoint(cp), b=encU.encode(ch), kind=KIND(ch), F=fragFor(curEnc);
   let status, pieces;
@@ -904,7 +993,7 @@ function showDetailSide(cp){ // the fields of the paper's figure
   }else{status=bitsFor(curEnc)[cp]?'whole token':'<span class="inv">split</span>';pieces='…';}
   const pre=b.subarray(0,b.length-1);
   const prefixLine=pre.length>=2&&F?`<dt>prefix</dt><dd>${hex(pre)} ${F[cp>>6]?'is a fragment token':'is not a token'}</dd>`:'';
-  $('#detail').innerHTML=(kind?`<div class="big kind">${kind}</div>`:`<div class="big">${MARK.test(ch)?'◌':''}${esc(ch)}</div>`)+`<dl><dt>code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)} (${b.length} byte${b.length>1?'s':''})</dd><dt>UTF-16</dt><dd>${utf16(cp)}</dd><dt>status</dt><dd class="plain">${status}</dd><dt>encoding</dt><dd class="split">${pieces}</dd>${prefixLine}</dl>${pinned!==null?'<div class="foot">Pinned. Click it again or press Esc to release.</div>':''}`;
+  $('#detail').innerHTML=(kind?`<div class="big kind">${kind}</div>`:bigGlyph(cp,ch))+`<dl><dt>code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)} (${b.length} byte${b.length>1?'s':''})</dd><dt>UTF-16</dt><dd>${utf16(cp)}</dd><dt>status</dt><dd class="plain">${status}</dd><dt>encoding</dt><dd class="split">${pieces}</dd>${prefixLine}</dl>${pinned!==null?'<div class="foot">Pinned. Click it again or press Esc to release.</div>':''}`;
   $('#detail').classList.toggle('pinned',pinned!==null);
 }
 function showDetail(cp){
@@ -912,7 +1001,7 @@ function showDetail(cp){
   if(isSide()){showDetailSide(cp);return;}
   if(!V){ // the vocabulary is still on its way: say what the bitmap knows, the pieces follow
     const w=bitsFor(curEnc)[cp], k=KIND(ch);
-    $('#detail').innerHTML=(k?`<div class="big kind">${k}</div>`:`<div class="big">${MARK.test(ch)?'◌':''}${esc(ch)}</div>`)+`<dl><dt>Code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)}</dd><dt>Tokens</dt><dd class="plain">${w?'1, whole':'<span class="inv">split</span>'}</dd><dt>Pieces</dt><dd class="plain">…</dd></dl>`;
+    $('#detail').innerHTML=(k?`<div class="big kind">${k}</div>`:bigGlyph(cp,ch))+`<dl><dt>Code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)}</dd><dt>Tokens</dt><dd class="plain">${w?'1, whole':'<span class="inv">split</span>'}</dd><dt>Pieces</dt><dd class="plain">…</dd></dl>`;
     $('#detail').classList.toggle('pinned',pinned!==null); return;
   }
   const ids=V.splitChar(ch), whole=ids.length===1&&V.bytes[ids[0]].length===b.length;
@@ -920,7 +1009,7 @@ function showDetail(cp){
   const pre=b.subarray(0,b.length-1), pk=BPE.key(pre,0,pre.length);
   const prefixLine=pre.length>=2&&vocabKeys().has(pk)&&!isTextToken(pk)?`<dt>Prefix</dt><dd>${hex(pre)} is a token</dd>`:'';
   const kind=KIND(ch);
-  $('#detail').innerHTML=(kind?`<div class="big kind">${kind}</div>`:`<div class="big">${MARK.test(ch)?'◌':''}${esc(ch)}</div>`)+`<dl><dt>Code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)}</dd><dt>Tokens</dt><dd class="plain">${whole?'1, whole':'<span class="inv">split into '+ids.length+'</span>'}</dd><dt>Pieces</dt><dd class="split">${split}</dd>${prefixLine}</dl>${pinned!==null?'<div class="foot">Pinned. Click it again or press Esc to release.</div>':''}`;
+  $('#detail').innerHTML=(kind?`<div class="big kind">${kind}</div>`:bigGlyph(cp,ch))+`<dl><dt>Code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)}</dd><dt>Tokens</dt><dd class="plain">${whole?'1, whole':'<span class="inv">split into '+ids.length+'</span>'}</dd><dt>Pieces</dt><dd class="split">${split}</dd>${prefixLine}</dl>${pinned!==null?'<div class="foot">Pinned. Click it again or press Esc to release.</div>':''}`;
   $('#detail').classList.toggle('pinned',pinned!==null);
 }
 $('#map').addEventListener('mousemove',ev=>{
@@ -1210,6 +1299,7 @@ const H=readHash(); const startEnc=[...$('#encsel').options].some(o=>o.value===H
     await fonts;
     if(!(bitsFor(startEnc)&&currentTab()==='map'))await p.catch(()=>{}); // no bitmap, or a tab that needs the vocabulary: wait for it
     drawMap(); Loader.release();
+    getData('fallback.json').then(j=>{Fallback.init(j);Fallback.watch(document.body);Fallback.need(Fallback.cpsOf(document.body.textContent));if(currentTab()==='map')drawMap();}).catch(e=>console.warn('fallback fonts',e));
   });
 })();
 })();
