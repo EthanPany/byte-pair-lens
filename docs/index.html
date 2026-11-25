@@ -242,6 +242,8 @@ footer a:hover{color:var(--fg)}
 @media (max-width:760px){h1{font-size:1.7rem}.rail,.mapnav,.covchips,.tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}.gsep{flex:none}.headline .big{font-size:2rem}.headline .more{margin-left:0}.mlegend .tip{flex-basis:100%}}
 @media (prefers-reduced-motion:reduce){.dock,.veil,.veilbar span,.bar .fill{transition:none}.chip.busy{animation:none}}
 </style>
+<script>/* a second design, side by side with this one: add ?design=tofu to the address */
+if(new URLSearchParams(location.search).get('design')==='tofu'){document.documentElement.dataset.design='tofu';document.write('<link rel="stylesheet" href="design-tofu.css">');}</script>
 </head>
 <body>
 
@@ -695,6 +697,9 @@ function fragFor(enc){
 }
 const LABELW=64, GAP=1;
 function cssVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+const TOFU=document.documentElement.dataset.design==='tofu'; // the second design: rounded cells, colour and motion from design-tofu.js
+function box(ctx,x,y,w,h,r){if(TOFU&&ctx.roundRect){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill();}else ctx.fillRect(x,y,w,h);}
+const fxDo=(m,a)=>{if(TOFU&&window.TofuFX)window.TofuFX[m](a);};
 function cellSize(block){const w=$('#mapscroll').clientWidth-(block?16:0);return Math.max(13,Math.min(22,Math.floor((w-LABELW-2)/64)-GAP));}
 function sizeCanvas(W,H){
   const cv=$('#map');
@@ -801,8 +806,13 @@ function drawOverview(){
     for(const {g,col} of r.groups){
       const x=LABELW+col*(cell+GAP), a=O.assigned[g]; pos.set(g,[x,r.y,ri,col]);
       if(!a){ctx.strokeStyle=cLine;ctx.setLineDash([2,2]);ctx.strokeRect(x+.5,r.y+.5,cell-1,cell-1);ctx.setLineDash([]);continue;}
-      ctx.fillStyle=cSplit; ctx.fillRect(x,r.y,cell,cell);
       const f=O.whole[g]/a;
+      if(TOFU){ // a square of tofu per cell: the more characters are whole tokens, the bigger the black square
+        ctx.fillStyle=cSplit; box(ctx,x,r.y,cell,cell,Math.max(2,cell*.22));
+        const side=(cell-3)*Math.sqrt(f); if(side>0.5){ctx.fillStyle=cAcc;box(ctx,x+(cell-side)/2,r.y+(cell-side)/2,side,side,Math.max(1.5,side*.22));}
+        continue;
+      }
+      ctx.fillStyle=cSplit; ctx.fillRect(x,r.y,cell,cell);
       if(f>0){ctx.globalAlpha=0.22+0.78*f;ctx.fillStyle=cAcc;ctx.fillRect(x,r.y,cell,cell);ctx.globalAlpha=1;}
     }
   });
@@ -829,6 +839,7 @@ function drawOverview(){
       if(!taken.some(([a,z])=>l<z&&r>a)){taken.push([l,r]);ctx.fillStyle=cFg;ctx.textAlign='center';ctx.fillText(name,cx,rows[0].y+sepH/2+3);ctx.textAlign='left';}
     }else if(cells.length>=12&&bx1-bx0>=tw+16){
       const cx=(bx0+bx1)/2, cy=(by0+by1)/2;
+      if(TOFU){ctx.fillStyle=cFg;box(ctx,cx-tw/2-11,cy-11,tw+22,22,11);ctx.fillStyle=cBg;ctx.textAlign='center';ctx.fillText(name,cx,cy+1);ctx.textAlign='left';continue;}
       ctx.fillStyle=cBg; ctx.fillRect(cx-tw/2-7,cy-10,tw+14,20); ctx.strokeStyle=cFg; ctx.strokeRect(cx-tw/2-6.5,cy-9.5,tw+13,19);
       ctx.fillStyle=cFg; ctx.textAlign='center'; ctx.fillText(name,cx,cy+1); ctx.textAlign='left';
     }
@@ -836,7 +847,8 @@ function drawOverview(){
   const by=[0,0,0,0,0].map(()=>[0,0]);
   for(let g=0;g<O.assigned.length;g++){if(!O.assigned[g])continue;const n=ByteMap.utf8Len(g<<6);by[n][0]+=O.assigned[g];by[n][1]+=O.whole[g];}
   $('#mapstats').innerHTML=`<span class="big">${pct(O.totW,O.totA)}</span><span class="say">of Unicode is one whole token in <b>${esc(encName())}</b></span><span class="more">${O.totW.toLocaleString()} of ${O.totA.toLocaleString()} characters`+[1,2,3,4].map(n=>` · ${n} byte${n>1?'s':''} <b>${pct(by[n][1],by[n][0])}</b>`).join('')+'</span>';
-  mapInfo={overview:true,rows,cell,O};
+  mapInfo={overview:true,rows,cell,O,pos};
+  fxDo('sync');
 }
 function overviewCell(ev){
   const {rows,cell}=mapInfo; const rc=$('#map').getBoundingClientRect(); const x=ev.clientX-rc.left-LABELW, y=ev.clientY-rc.top;
@@ -924,7 +936,7 @@ function drawMap(){
     for(let c=0;c<64;c++){
       const st=D.state[r*64+c], x=LABELW+c*(cell+GAP);
       if(!st){ctx.strokeStyle=cLine;ctx.setLineDash([2,2]);ctx.strokeRect(x+.5,y+.5,cell-1,cell-1);ctx.setLineDash([]);continue;}
-      ctx.fillStyle=st===1?cAcc:cSplit; ctx.fillRect(x,y,cell,cell);
+      ctx.fillStyle=st===1?cAcc:cSplit; box(ctx,x,y,cell,cell,Math.max(2,cell*.2));
     }
   }
   ctx.font=`${cell-6}px ${sans}`; ctx.textAlign='center';
@@ -944,6 +956,7 @@ function drawMap(){
   }
   $('#mapstats').innerHTML=`<span class="big">${pct(D.whole,D.assigned)}</span><span class="say">of <b>${blk.name}</b> is one whole token in <b>${esc(encName())}</b></span><span class="more">${D.whole.toLocaleString()} of ${D.assigned.toLocaleString()} characters · ${U(blk.lo)}–${blk.hi.toString(16).toUpperCase()}</span>`;
   mapInfo={blk,D,cell,headH,F};
+  fxDo('sync');
   fbView();
   if(side){const d=$('#detail');if(d.hidden||!d.innerHTML){d.innerHTML='<p class="sub">Hover or tap a cell.</p>';d.classList.remove('pinned');}d.hidden=false;d.style.left=d.style.top='';}
 }
@@ -1001,10 +1014,24 @@ function showDetail(cp){
 }
 $('#map').addEventListener('mousemove',ev=>{
   if(!mapInfo)return;
-  if(mapInfo.overview){const g=overviewCell(ev);if(g===null){hideCard();return;}showGroup(g);placeCard(ev);return;}
+  if(mapInfo.overview){const g=overviewCell(ev);if(g===null){hideCard();fxDo('clear');return;}showGroup(g);placeCard(ev);fxDo('over',g);return;}
+  const cp=cellAt(ev); if(cp===null)fxDo('clear'); else fxDo('cell',cp);
   if(pinned!==null)return;
-  const cp=cellAt(ev);if(cp===null){hideCard();return;}showDetail(cp);placeCard(ev);});
-$('#map').addEventListener('mouseleave',hideCard);
+  if(cp===null){hideCard();return;}showDetail(cp);placeCard(ev);});
+$('#map').addEventListener('mouseleave',()=>{hideCard();fxDo('clear');});
+// what the second design's overlay needs to know about the map: where a block's cells are, and one character's cell
+if(TOFU)window.BPL={
+  over(g){
+    if(!mapInfo||!mapInfo.overview)return null; const b=ByteMap.blockOf(g<<6); if(!b)return null; const cells=[];
+    for(let k=b.lo>>6;k<=b.hi>>6;k++){const q=mapInfo.pos.get(k),a=mapInfo.O.assigned[k];if(q&&a)cells.push([q[0],q[1],mapInfo.O.whole[k]/a,k]);}
+    const f=ByteMap.FEATURED.find(q=>b.lo>=q.lo&&b.hi<=q.hi)||b;
+    return {id:f.id,lo:b.lo,name:SHORTB[f.id]||b.name,cell:mapInfo.cell,cells};
+  },
+  cell(cp){
+    if(!mapInfo||mapInfo.overview)return null; const {D,cell,headH,blk}=mapInfo, r=(cp>>6)-D.r0, c=cp&63, ch=String.fromCodePoint(cp);
+    return {x:LABELW+c*(cell+GAP),y:headH+r*(cell+GAP),cell,ch:KIND(ch)||Fallback.missing(cp)?'':(MARK.test(ch)?'◌':'')+ch,id:blk.id,lo:blk.lo};
+  }
+};
 // the card belongs to the cell under the pointer: scrolling moves the cell away, so drop it
 window.addEventListener('scroll',hideCard,{passive:true}); $('#mapscroll').addEventListener('scroll',hideCard,{passive:true});
 $('#map').addEventListener('click',ev=>{
@@ -1291,5 +1318,6 @@ const H=readHash(); const startEnc=[...$('#encsel').options].some(o=>o.value===H
 })();
 })();
 </script>
+<script>if(document.documentElement.dataset.design==='tofu')document.body.appendChild(Object.assign(document.createElement('script'),{src:'design-tofu.js'}));</script>
 </body>
 </html>
