@@ -15,49 +15,7 @@
   const map=$('#map'), fx=document.createElement('canvas'); fx.id='mapfx'; fx.setAttribute('aria-hidden','true');
   map.after(fx);
   let ctx=fx.getContext('2d'), cur=null, raf=0;
-
-  /* ---- the open block in its colour while the pointer is on the map ----
-     Two layers under the overlay: one blended with screen for whole-token cells, one with multiply for split cells. */
-  const tw=document.createElement('canvas'), ts=document.createElement('canvas');
-  tw.id='tintw'; ts.id='tints'; for(const c of [tw,ts]){c.className='maptint';c.setAttribute('aria-hidden','true');}
-  map.after(tw,ts);
-  let tint_=null, traf=0; // {cells,cell,c,x0,y0,t0,out}
-  function tintSize(){
-    for(const c of [tw,ts]){c.width=map.width;c.height=map.height;c.style.width=map.style.width;c.style.height=map.style.height;c.style.left=map.offsetLeft+'px';c.style.top=map.offsetTop+'px';}
-  }
-  function tintFrame(){
-    const dpr=map.width/(parseFloat(map.style.width)||map.width||1), a=tw.getContext('2d'), b=ts.getContext('2d');
-    for(const c of [a,b]){c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,map.width,map.height);}
-    if(!tint_)return;
-    const now=performance.now(), {cells,cell,c,x0,y0}=tint_, r=Math.max(2,cell*.2), soft=tint(c,34); let busy=false;
-    const fade=tint_.out?Math.max(0,1-(now-tint_.out)/160):1;
-    if(tint_.out&&fade<=0){tint_=null;return;}
-    if(tint_.out)busy=true;
-    a.fillStyle=c; b.fillStyle=soft;
-    for(const q of cells){
-      let p=1;
-      if(!calm&&!tint_.full){const d=Math.min(420,Math.hypot(q[0]-x0,q[1]-y0)*.9);p=(now-tint_.t0-d)/180;if(p<=0){busy=true;continue;}if(p<1)busy=true;else p=1;}
-      const k=q[2]===1?a:b; k.globalAlpha=p*fade; k.beginPath(); if(k.roundRect)k.roundRect(q[0],q[1],cell,cell,r);else k.rect(q[0],q[1],cell,cell); k.fill();
-    }
-    if(!busy&&!tint_.out)tint_.full=true;
-    if(busy)traf=requestAnimationFrame(tintFrame);
-  }
-  function tintGo(){cancelAnimationFrame(traf);traf=requestAnimationFrame(tintFrame);}
-  function tintOn(e){
-    if(tint_&&!tint_.out)return;
-    const b=window.BPL&&window.BPL.block(); if(!b)return;
-    const r=map.getBoundingClientRect();
-    tint_={cells:b.cells,cell:b.cell,c:colour(b.id,b.lo),x0:e?e.clientX-r.left:0,y0:e?e.clientY-r.top:0,t0:performance.now(),full:!e};
-    tintGo();
-  }
-  function tintOff(){if(tint_&&!tint_.out){tint_.out=performance.now();tintGo();}}
-  map.addEventListener('mousemove',tintOn);
-  map.addEventListener('mouseleave',tintOff);
-
   function sync(){
-    tintSize(); const was=tint_&&!tint_.out; tint_=null; cancelAnimationFrame(traf);
-    if(was&&map.matches(':hover'))tintOn(null); else tintFrame(); // a redraw under the pointer keeps the colour, without a second ripple
-
     fx.width=map.width; fx.height=map.height; fx.style.width=map.style.width; fx.style.height=map.style.height;
     fx.style.left=map.offsetLeft+'px'; fx.style.top=map.offsetTop+'px';
     const dpr=map.width/(parseFloat(map.style.width)||map.width||1);

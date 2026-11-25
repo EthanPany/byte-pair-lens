@@ -52,10 +52,7 @@ html[data-design="tofu"] .stats>*{display:inline-flex;flex-direction:row-reverse
 
 /* map */
 html[data-design="tofu"] .mapscroll{border:0;border-radius:0}
-html[data-design="tofu"] #mapfx,html[data-design="tofu"] .maptint{position:absolute;left:0;top:0;pointer-events:none}
-/* the open block takes its colour under the pointer: screen turns the black cells, multiply the grey ones, and the characters stay readable */
-html[data-design="tofu"] #tintw{mix-blend-mode:screen}
-html[data-design="tofu"] #tints{mix-blend-mode:multiply}
+html[data-design="tofu"] #mapfx{position:absolute;left:0;top:0;pointer-events:none}
 html[data-design="tofu"] .detail{border:2px solid #000;border-radius:var(--rc);box-shadow:0 6px 0 #000;padding:16px 18px;animation:tofu-pop .22s cubic-bezier(.3,1.6,.5,1)}
 html[data-design="tofu"] .mapwrap.side .detail{border:0;box-shadow:none;animation:none}
 html[data-design="tofu"] .detail .split span{border:1.5px solid #000;border-radius:8px;background:#fff}
