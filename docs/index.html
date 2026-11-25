@@ -956,7 +956,7 @@ function drawMap(){
   }
   $('#mapstats').innerHTML=`<span class="big">${pct(D.whole,D.assigned)}</span><span class="say">of <b>${blk.name}</b> is one whole token in <b>${esc(encName())}</b></span><span class="more">${D.whole.toLocaleString()} of ${D.assigned.toLocaleString()} characters · ${U(blk.lo)}–${blk.hi.toString(16).toUpperCase()}</span>`;
   mapInfo={blk,D,cell,headH,F};
-  fxDo('sync');
+  fxDo('sync'); if(pinned!==null&&pinned>=blk.lo&&pinned<=blk.hi)fxDo('cell',pinned);
   fbView();
   if(side){const d=$('#detail');if(d.hidden||!d.innerHTML){d.innerHTML='<p class="sub">Hover or tap a cell.</p>';d.classList.remove('pinned');}d.hidden=false;d.style.left=d.style.top='';}
 }
@@ -1015,10 +1015,10 @@ function showDetail(cp){
 $('#map').addEventListener('mousemove',ev=>{
   if(!mapInfo)return;
   if(mapInfo.overview){const g=overviewCell(ev);if(g===null){hideCard();fxDo('clear');return;}showGroup(g);placeCard(ev);fxDo('over',g);return;}
-  const cp=cellAt(ev); if(cp===null)fxDo('clear'); else fxDo('cell',cp);
-  if(pinned!==null)return;
-  if(cp===null){hideCard();return;}showDetail(cp);placeCard(ev);});
-$('#map').addEventListener('mouseleave',()=>{hideCard();fxDo('clear');});
+  if(pinned!==null){fxDo('cell',pinned);return;} // a pinned character keeps both the card and the highlight
+  const cp=cellAt(ev);
+  if(cp===null){hideCard();fxDo('clear');return;}showDetail(cp);placeCard(ev);fxDo('cell',cp);});
+$('#map').addEventListener('mouseleave',()=>{hideCard();if(pinned===null||!mapInfo||mapInfo.overview)fxDo('clear');});
 // what the second design's overlay needs to know about the map: where a block's cells are, and one character's cell
 if(TOFU)window.BPL={
   over(g){
@@ -1034,6 +1034,7 @@ if(TOFU)window.BPL={
 };
 // the card belongs to the cell under the pointer: scrolling moves the cell away, so drop it
 window.addEventListener('scroll',hideCard,{passive:true}); $('#mapscroll').addEventListener('scroll',hideCard,{passive:true});
+if(TOFU){const off=()=>{if(pinned===null)fxDo('clear');};window.addEventListener('scroll',off,{passive:true});$('#mapscroll').addEventListener('scroll',off,{passive:true});}
 $('#map').addEventListener('click',ev=>{
   if(!mapInfo)return;
   if(mapInfo.overview){const g=overviewCell(ev);if(g!==null)openGroup(g);return;}
