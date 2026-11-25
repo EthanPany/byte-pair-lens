@@ -5,7 +5,6 @@
   'use strict';
   if(document.documentElement.dataset.design!=='tofu')return;
   const calm=matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const fine=matchMedia('(pointer: fine)').matches;
   const PAL={ascii:'#ffd23f',latin:'#ff9f1c',greek:'#2ec4b6',cyrillic:'#3a86ff',hebrew:'#8338ec',arabic:'#06d6a0',devanagari:'#ef476f',bengali:'#f78c6b',thai:'#9b5de5',kana:'#ff70a6',hangul:'#00bbf9',han:'#ff5a36',hanA:'#ffa630',emoji:'#fee440',hanB:'#7bd389'};
   const colour=(id,lo)=>PAL[id]||`hsl(${(lo*47>>>4)%360} 85% 58%)`;
   const tint=(c,p)=>`color-mix(in srgb, ${c} ${p}%, #fff)`;
@@ -67,33 +66,17 @@
       const xs=b.cells.map(q=>q[0]), ys=b.cells.map(q=>q[1]);
       cur={kind:'block',id:b.id+':'+b.lo,name:b.name,cells:b.cells,cell:b.cell,c:colour(b.id,b.lo),x0:mine?mine[0]:0,y0:mine?mine[1]:0,t0:performance.now(),
         bx0:Math.min(...xs),bx1:Math.max(...xs)+b.cell,by0:Math.min(...ys),by1:Math.max(...ys)+b.cell,font:getComputedStyle(document.documentElement).getPropertyValue('--sans')};
-      paint(cur.c); go();
+      go();
     },
     cell(cp){
       const q=window.BPL&&window.BPL.cell(cp); if(!q){FX.clear();return;}
       if(cur&&cur.kind==='cell'&&cur.cp===cp)return;
       cur={kind:'cell',cp,x:q.x,y:q.y,cell:q.cell,ch:q.ch,c:colour(q.id,q.lo),font:getComputedStyle(document.documentElement).getPropertyValue('--sans'),t0:performance.now()};
-      paint(cur.c); go();
+      go();
     },
-    clear(){if(!cur)return;cur=null;paint(null);go();}
+    clear(){if(!cur)return;cur=null;go();}
   };
   window.TofuFX=FX;
-
-  /* ---- the block of tofu that follows the pointer ---- */
-  let dot=null, tx=0, ty=0, px=0, py=0, seen=false;
-  function paint(c){if(dot){if(c)dot.style.setProperty('--c',c);else dot.style.removeProperty('--c');}}
-  if(fine&&!calm){
-    dot=document.createElement('div'); dot.id='tofucur'; dot.setAttribute('aria-hidden','true'); document.body.append(dot);
-    const hot='button,a,canvas,.tok,label,select,textarea,input,td.v,tr[data-id]';
-    addEventListener('pointermove',e=>{
-      tx=e.clientX+14; ty=e.clientY+16; if(!seen){seen=true;px=tx;py=ty;dot.classList.add('on');}
-      dot.classList.toggle('over',!!(e.target.closest&&e.target.closest(hot)));
-    },{passive:true});
-    addEventListener('pointerdown',()=>dot.classList.add('down'),{passive:true});
-    addEventListener('pointerup',()=>dot.classList.remove('down'),{passive:true});
-    document.documentElement.addEventListener('pointerleave',()=>{dot.classList.remove('on');seen=false;});
-    (function follow(){px+=(tx-px)*.2;py+=(ty-py)*.2;const lean=Math.max(-18,Math.min(18,(tx-px)*.9));dot.style.transform=`translate(${px}px,${py}px) rotate(${lean}deg)`;requestAnimationFrame(follow);})();
-  }
 
   /* ---- the wordmark's eyes look at the pointer ---- */
   const face=$('h1 .tofu');

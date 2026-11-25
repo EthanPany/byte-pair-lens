@@ -96,14 +96,7 @@ html[data-design="tofu"] .veilcard::before{content:"";position:absolute;left:22p
 html[data-design="tofu"] .veilbar{border-radius:var(--r);overflow:hidden}
 @keyframes tofu-bounce{0%,100%{transform:translateY(0) scale(1.12,.86)}45%{transform:translateY(-12px) scale(.94,1.08)}}
 
-/* a small block of tofu follows the pointer and squashes on a click */
-#tofucur{position:fixed;left:0;top:0;z-index:60;width:16px;height:16px;border:2.5px solid #000;border-radius:5px;background:#fff;pointer-events:none;opacity:0;transition:opacity .2s,background .2s,width .15s,height .15s,border-radius .15s;will-change:transform}
-#tofucur.on{opacity:1}
-#tofucur.down{width:20px;height:11px}
-#tofucur.over{background:var(--c,#ffe27a);width:22px;height:22px;border-radius:7px}
-
 @media (prefers-reduced-motion:reduce){
   html[data-design="tofu"] *{animation:none!important;transition:none!important}
-  #tofucur{display:none}
 }
 @media (max-width:760px){html[data-design="tofu"] h1{font-size:2rem}html[data-design="tofu"] .headline .big{font-size:2.8rem}}
