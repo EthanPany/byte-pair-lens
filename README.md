@@ -1,4 +1,6 @@
-# Byte Pair Lens
+# T▯FU: Tokens or Fragments of UTF-8
+
+Formerly Byte Pair Lens; the repository and URL keep that name.
 
 Interactive visualiser for how byte-level BPE tokenizers (GPT-2 / GPT-4 / GPT-4o) cut text into UTF-8 bytes and merges, with a vocabulary breakdown by script and a code-point coverage map for CJK.
 

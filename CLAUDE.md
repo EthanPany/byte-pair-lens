@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Byte Pair Lens: a client-side visualiser for byte-level BPE tokenizers (r50k / cl100k / o200k), focused on how CJK text is split into UTF-8 bytes and merges. Target is a NAACL 2027 System Demonstrations submission (deadline 4 Dec 2026 AoE: live URL + ≤2.5-min video + ≤6-page paper). `HANDOFF.md` has the prioritised roadmap (HF `tokenizer.json` loading, non-Han script maps, coverage metrics table/CSV, side-by-side view) — read it before starting feature work.
+TOFU (written T▯FU, "Tokens or Fragments of UTF-8"; formerly Byte Pair Lens, which the repository, the URL and internal names such as `bpl-data-v1` keep): a client-side visualiser for byte-level BPE tokenizers (r50k / cl100k / o200k), focused on how CJK text is split into UTF-8 bytes and merges. Target is a NAACL 2027 System Demonstrations submission (deadline 4 Dec 2026 AoE: live URL + ≤2.5-min video + ≤6-page paper). `HANDOFF.md` has the prioritised roadmap (HF `tokenizer.json` loading, non-Han script maps, coverage metrics table/CSV, side-by-side view) — read it before starting feature work.
 
 ## Branches and deployment
 
