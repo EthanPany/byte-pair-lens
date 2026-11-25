@@ -1027,6 +1027,11 @@ if(TOFU)window.BPL={
     const f=ByteMap.FEATURED.find(q=>b.lo>=q.lo&&b.hi<=q.hi)||b;
     return {id:f.id,lo:b.lo,name:SHORTB[f.id]||b.name,cell:mapInfo.cell,cells};
   },
+  block(){ // every cell of the open block: [x, y, 1 whole | 2 split]
+    if(!mapInfo||mapInfo.overview)return null; const {D,cell,headH,blk}=mapInfo, cells=[];
+    for(let r=0;r<D.rows;r++)for(let c=0;c<64;c++){const st=D.state[r*64+c];if(st)cells.push([LABELW+c*(cell+GAP),headH+r*(cell+GAP),st]);}
+    return {id:blk.id,lo:blk.lo,cell,cells};
+  },
   cell(cp){
     if(!mapInfo||mapInfo.overview)return null; const {D,cell,headH,blk}=mapInfo, r=(cp>>6)-D.r0, c=cp&63, ch=String.fromCodePoint(cp);
     return {x:LABELW+c*(cell+GAP),y:headH+r*(cell+GAP),cell,ch:KIND(ch)||Fallback.missing(cp)?'':(MARK.test(ch)?'◌':'')+ch,id:blk.id,lo:blk.lo};
