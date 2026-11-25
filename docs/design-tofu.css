@@ -71,6 +71,10 @@ html[data-design="tofu"] .tok.t5:hover{background:var(--tok-5)!important}
 html[data-design="tofu"] .tok:hover{transform:translateY(-3px) rotate(-1.5deg);box-shadow:0 4px 0 #000}
 html[data-design="tofu"] .tok.frag{background:#000!important;border-color:#000}
 html[data-design="tofu"] .tok.frag:hover{background:var(--hot)!important;border-color:#000;transform:translateY(-3px) rotate(2deg)}
+/* the pieces of one character light up together, in the colour of its script */
+html[data-design="tofu"] .tok.lit,html[data-design="tofu"] .tok.lit:hover{background:var(--c,var(--hot))!important;border-color:#000;transform:translateY(-3px) rotate(-1.5deg);box-shadow:0 4px 0 #000}
+html[data-design="tofu"] .tok.lit:nth-child(2n){transform:translateY(-3px) rotate(1.5deg)}
+html[data-design="tofu"] .tok.frag.lit .t,html[data-design="tofu"] .tok.frag.lit .b{color:#000;opacity:1}
 html[data-design="tofu"] .tok:nth-child(2n){animation-delay:.03s}
 html[data-design="tofu"] .tok:nth-child(3n){animation-delay:.06s}
 html[data-design="tofu"] .tok:nth-child(5n){animation-delay:.09s}

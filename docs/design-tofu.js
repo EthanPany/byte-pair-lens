@@ -90,5 +90,17 @@
     const b=e.target.closest&&e.target.closest('button[data-b]'); if(!b||b.style.getPropertyValue('--c'))return;
     const id=b.dataset.b; if(PAL[id])b.style.setProperty('--c',tint(PAL[id],70));
   });
+  /* ---- tokens: the pieces of one character light up together, in the colour of its script ---- */
+  let litBox=null, litG=null;
+  const unlit=()=>{if(litBox)for(const d of litBox.querySelectorAll('.tok.lit'))d.classList.remove('lit');litBox=litG=null;};
+  document.addEventListener('mouseover',e=>{
+    const t=e.target.closest&&e.target.closest('.tok');
+    if(!t){unlit();return;}
+    if(t.parentNode===litBox&&t.dataset.g===litG)return;
+    unlit(); const cp=+t.dataset.cp; if(!cp&&!t.classList.contains('frag'))return; // plain ASCII keeps its own hover
+    litBox=t.parentNode; litG=t.dataset.g;
+    let c=PAL.han; if(cp){const b=window.ByteMap&&ByteMap.blockOf(cp), f=b&&(ByteMap.FEATURED.find(q=>b.lo>=q.lo&&b.hi<=q.hi)||b); c=f?colour(f.id,f.lo):colour('',cp);}
+    for(const d of litBox.children)if(d.dataset.g===litG){d.style.setProperty('--c',c);d.classList.add('lit');}
+  });
   sync();
 })();
