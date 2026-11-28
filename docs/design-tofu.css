@@ -1,0 +1,126 @@
+/* Second design, shown side by side with the first: index.html?design=tofu
+   White ground, black ink, rounded corners. Colour appears only on hover: each script has its own. */
+@font-face{font-family:"Inter";font-weight:100 900;font-display:fallback;src:url(fonts/inter-latin-wght-normal.woff2) format("woff2")}
+html[data-design="tofu"]{
+  --fg:#000000;--muted:#555555;--line:#d4d4d4;--tint:#f2f2f2;
+  --whole:#000000;--split:#ededed;--frag:#000000;--frag-ink:#ffffff;--tok-edge:#000000;
+  --hot:#ff5a36; /* the colour a byte fragment shows on hover */
+  --sans-base:"Inter","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC",system-ui,"Helvetica Neue",Arial,sans-serif;
+  --sans:"Inter","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC",system-ui,"Helvetica Neue",Arial,sans-serif,"BPL Fallback";
+  --h:38px;--r:999px;--rc:20px;
+}
+html[data-design="tofu"] body{font-feature-settings:"ss01","cv11"}
+
+/* wordmark: the box is a block of tofu with a face; its eyes follow the pointer */
+html[data-design="tofu"] h1{font-family:"Inter",var(--sans);font-weight:800;font-size:2.6rem;letter-spacing:-.03em;display:inline-flex;align-items:center;cursor:default}
+html[data-design="tofu"] h1 .tofu{position:relative;width:.86em;height:.86em;border:.11em solid #000;border-radius:.24em;margin:0 .08em 0 .06em;background:#fff;transform-origin:50% 100%;transition:background .25s}
+html[data-design="tofu"] h1 .tofu::before,html[data-design="tofu"] h1 .tofu::after{content:"";position:absolute;top:36%;width:.1em;height:.14em;border-radius:.05em;background:#000;transform:translate(calc(var(--ex,0)*.05em),calc(var(--ey,0)*.04em));animation:tofu-blink 5s infinite}
+html[data-design="tofu"] h1 .tofu::before{left:24%}
+html[data-design="tofu"] h1 .tofu::after{right:24%}
+html[data-design="tofu"] h1:hover .tofu{animation:tofu-jiggle .6s cubic-bezier(.3,1.6,.5,1);background:#fff3c4}
+@keyframes tofu-blink{0%,46%,50%,100%{scale:1 1}48%{scale:1 .1}}
+@keyframes tofu-jiggle{0%{transform:scale(1,1)}25%{transform:scale(1.14,.84)}50%{transform:scale(.92,1.1)}75%{transform:scale(1.05,.96)}100%{transform:scale(1,1)}}
+
+/* controls: one pill shape, black outline, black when chosen */
+html[data-design="tofu"] button,html[data-design="tofu"] input,html[data-design="tofu"] select{border-radius:var(--r)}
+html[data-design="tofu"] .chip,html[data-design="tofu"] .btn,html[data-design="tofu"] .pills button,html[data-design="tofu"] .scriptchips button,html[data-design="tofu"] .samples button,html[data-design="tofu"] .pager button,html[data-design="tofu"] .chips label{border:1.5px solid #000;border-radius:var(--r);padding:0 15px;font-weight:500;transition:background .18s,color .18s,transform .18s cubic-bezier(.3,1.6,.5,1),box-shadow .18s}
+html[data-design="tofu"] .chip:hover,html[data-design="tofu"] .btn:hover,html[data-design="tofu"] .pills button:hover,html[data-design="tofu"] .scriptchips button:hover,html[data-design="tofu"] .samples button:hover,html[data-design="tofu"] .chips label:hover{transform:translateY(-2px);box-shadow:0 3px 0 #000;background:var(--c,#fff)}
+html[data-design="tofu"] .chip:active,html[data-design="tofu"] .btn:active,html[data-design="tofu"] .scriptchips button:active{transform:translateY(1px) scale(.97,.94);box-shadow:none}
+html[data-design="tofu"] .chip[aria-checked="true"],html[data-design="tofu"] .pills button[aria-checked="true"],html[data-design="tofu"] .scriptchips button[aria-pressed="true"]{background:#000;color:#fff}
+html[data-design="tofu"] .chip[aria-checked="true"]:hover,html[data-design="tofu"] .scriptchips button[aria-pressed="true"]:hover{background:#000}
+html[data-design="tofu"] .chip.own{border-style:dashed;color:#000}
+html[data-design="tofu"] .samples button{color:#000}
+html[data-design="tofu"] .gsep{display:none}
+html[data-design="tofu"] .pills{background:var(--tint);border-radius:var(--r);padding:3px;gap:2px}
+html[data-design="tofu"] .pills button{border-color:transparent;background:transparent;min-height:32px}
+html[data-design="tofu"] .pills button:hover{box-shadow:none;transform:none;background:#fff}
+html[data-design="tofu"] .tabs{border:0;gap:4px;background:var(--tint);border-radius:var(--r);padding:4px;width:max-content;max-width:100%}
+html[data-design="tofu"] .tabs button{border:0;margin:0;padding:9px 18px;border-radius:var(--r);color:#000;font-weight:500;transition:background .18s,color .18s}
+html[data-design="tofu"] .tabs button:hover{background:#fff}
+html[data-design="tofu"] .tabs button[aria-selected="true"]{background:#000;color:#fff}
+html[data-design="tofu"] .dock{border:1.5px solid #000;border-radius:var(--r);padding:6px;box-shadow:0 4px 0 #000}
+html[data-design="tofu"] .dockbtn,html[data-design="tofu"] .dockpill{border-radius:var(--r);border-color:transparent}
+html[data-design="tofu"] textarea{border:1.5px solid #000;border-radius:var(--rc);padding:14px 18px}
+html[data-design="tofu"] input[type=search],html[data-design="tofu"] select{border:1.5px solid #000;padding:0 15px}
+html[data-design="tofu"] :focus-visible{outline:3px solid #000;outline-offset:2px}
+
+/* numbers */
+html[data-design="tofu"] .headline .big{font-size:4rem;font-weight:800;letter-spacing:-.04em;color:#000}
+html[data-design="tofu"] .stats b{font-size:1.9rem;font-weight:800;letter-spacing:-.03em;margin-left:0;margin-right:6px}
+html[data-design="tofu"] .stats{gap:34px;align-items:baseline}
+html[data-design="tofu"] .stats>*{display:inline-flex;flex-direction:row-reverse;align-items:baseline}
+
+/* map */
+html[data-design="tofu"] .mapscroll{border:0;border-radius:0}
+html[data-design="tofu"] #mapfx{position:absolute;left:0;top:0;pointer-events:none}
+html[data-design="tofu"] .detail{border:2px solid #000;border-radius:var(--rc);box-shadow:0 6px 0 #000;padding:16px 18px;animation:tofu-pop .22s cubic-bezier(.3,1.6,.5,1)}
+html[data-design="tofu"] .mapwrap.side .detail{border:0;box-shadow:none;animation:none}
+html[data-design="tofu"] .detail .split span{border:1.5px solid #000;border-radius:8px;background:#fff}
+html[data-design="tofu"] .detail .split span.frag{background:#000;color:#fff}
+html[data-design="tofu"] .inv{border-radius:6px;padding:1px 6px}
+html[data-design="tofu"] .mlegend span::before{border-radius:4px;width:13px;height:13px}
+@keyframes tofu-pop{0%{transform:scale(.9);opacity:0}100%{transform:scale(1);opacity:1}}
+
+/* tokens: outlined blocks; a token shows its colour when the pointer is on it, a fragment turns hot */
+html[data-design="tofu"] .tok{border:1.5px solid #000;border-radius:12px;padding:6px 11px;background:#fff!important;transition:background .2s,transform .2s cubic-bezier(.3,1.6,.5,1),box-shadow .2s;animation:tofu-drop .35s cubic-bezier(.3,1.5,.5,1) backwards}
+html[data-design="tofu"] .tok.t1:hover{background:var(--tok-1)!important}
+html[data-design="tofu"] .tok.t2:hover{background:var(--tok-2)!important}
+html[data-design="tofu"] .tok.t3:hover{background:var(--tok-3)!important}
+html[data-design="tofu"] .tok.t4:hover{background:var(--tok-4)!important}
+html[data-design="tofu"] .tok.t5:hover{background:var(--tok-5)!important}
+html[data-design="tofu"] .tok:hover{transform:translateY(-3px) rotate(-1.5deg);box-shadow:0 4px 0 #000}
+html[data-design="tofu"] .tok.frag{background:#000!important;border-color:#000}
+html[data-design="tofu"] .tok.frag:hover{background:var(--hot)!important;border-color:#000;transform:translateY(-3px) rotate(2deg)}
+/* the pieces of one character light up together, in the colour of its script */
+html[data-design="tofu"] .tok.lit,html[data-design="tofu"] .tok.lit:hover{background:var(--c,var(--hot))!important;border-color:#000;transform:translateY(-3px) rotate(-1.5deg);box-shadow:0 4px 0 #000}
+html[data-design="tofu"] .tok.lit:nth-child(2n){transform:translateY(-3px) rotate(1.5deg)}
+html[data-design="tofu"] .tok.frag.lit .t,html[data-design="tofu"] .tok.frag.lit .b{color:#000;opacity:1}
+html[data-design="tofu"] .tok:nth-child(2n){animation-delay:.03s}
+html[data-design="tofu"] .tok:nth-child(3n){animation-delay:.06s}
+html[data-design="tofu"] .tok:nth-child(5n){animation-delay:.09s}
+@keyframes tofu-drop{0%{transform:translateY(-10px) scale(.92);opacity:0}100%{transform:none;opacity:1}}
+html[data-design="tofu"] .legend .w::before{background:#fff;outline:1.5px solid #000;outline-offset:-1.5px;border-radius:4px}
+html[data-design="tofu"] .legend .f::before{border-radius:4px}
+
+/* bars, tables, tree */
+html[data-design="tofu"] .panel{border-top:2px solid #000}
+html[data-design="tofu"] .bar{border-radius:10px}
+html[data-design="tofu"] .bar .rail{height:12px;border-radius:var(--r);background:var(--tint)}
+html[data-design="tofu"] .bar .fill{border-radius:var(--r)}
+html[data-design="tofu"] .bar:hover .fill{background:var(--hot)}
+html[data-design="tofu"] .tbl{border-top:2px solid #000}
+html[data-design="tofu"] .covtbl td.v{border-radius:10px;border:2px solid #fff;transition:transform .15s cubic-bezier(.3,1.6,.5,1)}
+html[data-design="tofu"] .covtbl td.v:hover{transform:scale(1.08);outline:2px solid #000;outline-offset:-2px}
+html[data-design="tofu"] .tree .nd{border:1.5px solid #000;border-radius:10px;background:#fff}
+html[data-design="tofu"] .tree .nd.frag{background:#000;color:#fff}
+
+/* loading: a block of tofu bounces on the card */
+html[data-design="tofu"] .veilcard{border:2px solid #000;border-radius:var(--rc);box-shadow:0 6px 0 #000;padding-top:54px;position:relative}
+html[data-design="tofu"] .veilcard::before{content:"";position:absolute;left:22px;top:16px;width:24px;height:24px;border:3px solid #000;border-radius:7px;background:#fff;transform-origin:50% 100%;animation:tofu-bounce .9s infinite cubic-bezier(.4,0,.6,1)}
+html[data-design="tofu"] .veilbar{border-radius:var(--r);overflow:hidden}
+@keyframes tofu-bounce{0%,100%{transform:translateY(0) scale(1.12,.86)}45%{transform:translateY(-12px) scale(.94,1.08)}}
+
+@media (prefers-reduced-motion:reduce){
+  html[data-design="tofu"] *{animation:none!important;transition:none!important}
+}
+@media (max-width:760px){html[data-design="tofu"] h1{font-size:2rem}html[data-design="tofu"] .headline .big{font-size:2.8rem}}
+
+/* coverage chart: the value card and the chip of the script described below */
+html[data-design="tofu"] .covchartwrap{border:1.5px solid #000;border-radius:16px}
+html[data-design="tofu"] .covtip{border:1.5px solid #000;border-radius:12px;box-shadow:0 4px 0 #000;padding:9px 12px}
+html[data-design="tofu"] .covtip i{border-radius:3px}
+html[data-design="tofu"] .mlegend .sw::before{border-radius:3px}
+
+/* fonts on their way: the bar above the map, and the cell size buttons */
+html[data-design="tofu"] .fbbar{height:4px;border-radius:2px}
+html[data-design="tofu"] .fbbar i{background:#000;border-radius:2px}
+html[data-design="tofu"] .zoomseg button{font-weight:600}
+
+/* newer pieces: tagline, tofu tooltip, loading pill, coverage groups, vocabulary bar */
+html[data-design="tofu"] .tagline{font-weight:500}
+html[data-design="tofu"] .tofutip{border-radius:14px;box-shadow:0 4px 0 rgba(0,0,0,.25)}
+html[data-design="tofu"] .mlegend .fbnote{border-radius:999px}
+html[data-design="tofu"] .covsets button{border:1.5px solid #000}
+html[data-design="tofu"] .stack{height:26px;border-radius:999px;overflow:hidden}
+html[data-design="tofu"] .stackkey button{border:1.5px solid #000;border-radius:999px}
+html[data-design="tofu"] .vocabtbl{border-radius:14px}
