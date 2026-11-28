@@ -234,6 +234,7 @@ td.hex,td.num,.mono{font-family:var(--mono);font-size:.82rem}
 .mlegend .pat::before{display:none}
 .patpic{display:inline-flex;gap:2px;margin-right:7px;vertical-align:-2px}
 .patpic i{display:block;height:12px;background:var(--c)}
+.mlegend .pat b{font-family:var(--mono);font-weight:500;color:var(--fg)}
 .barctl .pills{margin-bottom:0}
 .barctl>*{align-self:center}
 .barwrap .detail[hidden]{display:none}
@@ -1410,7 +1411,7 @@ function drawBarcode(){
   $('#barsay').textContent=`${N.toLocaleString()} characters: ${(count.get(0)||0).toLocaleString()} whole, ${split.toLocaleString()} split`;
   $('#barrange').querySelectorAll('button').forEach(b=>b.setAttribute('aria-checked',String((b.dataset.n==='all')===barAll)));
   $('#baronly').setAttribute('aria-pressed',String(barOnly));
-  $('#barlegend').innerHTML=`<span class="whole" title="One token for the whole character">${(count.get(0)||0).toLocaleString()} whole</span>`+order.map(k=>{const p=C.pats[k].split('+').map(Number);return `<span class="pat" style="--c:${col(k)}" title="Split into ${p.length} tokens of ${p.join(', ')} byte${p[p.length-1]>1?'s':''}"><span class="patpic" aria-hidden="true">${p.map(n=>`<i style="width:${n*9}px"></i>`).join('')}</span>${count.get(k).toLocaleString()}</span>`;}).join('');
+  $('#barlegend').innerHTML=`<span class="whole" title="One token for the whole character">${(count.get(0)||0).toLocaleString()} whole</span>`+order.map(k=>{const p=C.pats[k].split('+').map(Number);return `<span class="pat" style="--c:${col(k)}" title="Split into ${p.length} tokens of ${p.join(', ')} byte${p[p.length-1]>1?'s':''}"><span class="patpic" aria-hidden="true">${p.map(n=>`<i style="width:${n*9}px"></i>`).join('')}</span><b>${C.pats[k]}</b> · ${count.get(k).toLocaleString()}</span>`;}).join('')+(order.length?'<span class="tip" title="The paper\'s split pattern: the byte length of each token the character becomes">split pattern = bytes per token</span>':'');
 }
 function barTip(ev){
   const tip=$('#bartip'); if(!ev||!barInfo){tip.hidden=true;return;}
