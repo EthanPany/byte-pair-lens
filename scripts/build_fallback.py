@@ -27,6 +27,7 @@ ROOT = Path(__file__).parent.parent / 'docs'
 OUT = ROOT / 'fonts' / 'fb'
 INDEX = ROOT / 'fallback.json'
 SLICE = 1024           # code points per slice in large blocks
+HEAVY = 80_000         # a slice over this many bytes is cut in two (and again), so a slow line shows rows sooner; 64 code points at least
 SKIP = {'Basic Latin', 'Latin-1 Supplement', 'Private Use Area', 'High Surrogates', 'High Private Use Surrogates',
         'Low Surrogates', 'Supplementary Private Use Area-A', 'Supplementary Private Use Area-B', 'Tags',
         'Variation Selectors', 'Variation Selectors Supplement'}
@@ -123,8 +124,12 @@ def build(noto_dir, plan_dir, node_modules, extra_dir):
         out = OUT / f'{name}.woff2'
         subset.save_font(f, str(out), opt)
         f.close()
+        if out.stat().st_size > HEAVY and len(cps) >= 128:
+            out.unlink()
+            return False
         slices.append({'f': out.name, 'v': digest(out), 'g': group, 'r': runs(cps)})
         n_out += 1
+        return True
 
     for lo, hi, bname in blocks():
         if bname in SKIP:
@@ -138,9 +143,14 @@ def build(noto_dir, plan_dir, node_modules, extra_dir):
                 got = sorted(fonts[best][1] & left)
                 if not got:
                     break
-                for i in range(0, len(got), SLICE):
-                    emit(f'{slug}-{k}', best, got[i:i + SLICE], bname)
-                    k += 1
+                todo = [got[i:i + SLICE] for i in range(0, len(got), SLICE)]
+                while todo:
+                    part = todo.pop(0)
+                    if emit(f'{slug}-{k}', best, part, bname):
+                        k += 1
+                    else:
+                        h = len(part) // 2
+                        todo[:0] = [part[:h], part[h:]]
                 left -= set(got)
         if k == 0 and not (set(range(lo, hi + 1)) & sc_has):
             missing.append(bname)
