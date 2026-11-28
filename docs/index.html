@@ -996,9 +996,9 @@ function drawMap(){
       const st=D.state[r*64+c]; if(!st)continue;
       const cp=((D.r0+r)<<6)|c, ch=String.fromCodePoint(cp); if(KIND(ch))continue;
       ctx.fillStyle=st===1?cBg:cFg;
-      if(Fallback.missing(cp)){ // no font anywhere: its code point in small type (a dot in cells under 15 px), never a box
+      if(Fallback.missing(cp)){ // no font anywhere: its code point in small type (a dot in cells under 12 px), never a box
         const cx=LABELW+c*(cell+GAP)+cell/2; ctx.globalAlpha=.6;
-        if(cell>=15){const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2),fs=Math.max(5,cell*.34);ctx.font=`${fs}px ${mono}`;ctx.fillText(h.slice(0,m),cx,y+cell/2-fs*.5+.5,cell-2);ctx.fillText(h.slice(m),cx,y+cell/2+fs*.5+.5,cell-2);ctx.font=`${cell-6}px ${sans}`;}
+        if(cell>=12){const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2),fs=Math.max(4.4,cell*.34);ctx.font=`${fs}px ${mono}`;ctx.fillText(h.slice(0,m),cx,y+cell/2-fs*.5+.5,cell-2);ctx.fillText(h.slice(m),cx,y+cell/2+fs*.5+.5,cell-2);ctx.font=`${cell-6}px ${sans}`;}
         else{const q=Math.max(2,Math.round(cell/7));ctx.fillRect(cx-q/2,y+cell/2-q/2,q,q);}
         ctx.globalAlpha=1;continue;}
       if(Fallback.waiting(cp))continue;
