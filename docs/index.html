@@ -40,7 +40,10 @@ body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);font-
 .wrap>*,section,[role=tabpanel]>*{min-width:0}
 [role=tabpanel]{display:grid;grid-template-columns:minmax(0,1fr);gap:44px;padding-top:6px}
 h1{font-family:"Bree Serif",Georgia,serif;font-weight:400;font-size:2.1rem;line-height:1.15;margin:0 0 2px}
-h1 .tofu{display:inline-block;width:.62em;height:.74em;border:.085em solid currentColor;box-sizing:border-box;margin:0 .07em 0 .05em;vertical-align:baseline} /* the missing-glyph box that gives the tool its name */
+h1{display:inline-block;cursor:help}
+.tagline{margin:0;color:var(--muted);font-size:.95rem;vertical-align:baseline}
+h1 .tofu>span{color:transparent;font-size:.3em;line-height:1;vertical-align:top} /* the real character U+25AF, so the heading copies as T▯FU; the box itself is drawn */
+h1 .tofu{overflow:hidden;white-space:nowrap;display:inline-block;width:.62em;height:.74em;border:.085em solid currentColor;box-sizing:border-box;margin:0 .07em 0 .05em;vertical-align:baseline} /* the missing-glyph box that gives the tool its name */
 h2{font-size:1.05rem;font-weight:600;margin:0 0 12px}
 h2 small{font-weight:400;color:var(--muted);font-size:.85rem;margin-left:6px}
 p{margin:0;max-width:70ch}
@@ -261,7 +264,8 @@ footer a:hover{color:var(--fg)}
 
 <div class="wrap">
   <header>
-    <h1 aria-label="TOFU" title="Tokens or Fragments of UTF-8">T<span class="tofu" aria-hidden="true"></span>FU</h1>
+    <h1 aria-label="TOFU" title="Tofu: the empty box a font shows when it has no glyph for a character. A tokenizer’s tofu is a character with no token of its own, spelled out in bytes instead.">T<span class="tofu"><span>▯</span></span>FU</h1>
+    <p class="tagline">Tokens or Fragments of UTF-8</p>
   </header>
   <div class="rail" id="encrail" role="radiogroup" aria-label="Tokenizer"></div>
   <p class="note" id="loadstatus" aria-live="polite"></p>
@@ -851,7 +855,7 @@ function drawOverview(){
   });
   // name the scripts on the map itself: an outline per featured script, a label where it fits
   const taken=[]; // label spans already used in the band above the first row
-  for(const b of [...ByteMap.FEATURED].sort((p,q)=>(q.hi-q.lo)-(p.hi-p.lo))){
+  for(const b of [...ByteMap.FEATURED,...MORE.map(([id])=>ByteMap.BLOCK[id])].sort((p,q)=>(q.hi-q.lo)-(p.hi-p.lo))){
     const cells=[]; for(let g=b.lo>>6;g<=b.hi>>6;g++){const p=pos.get(g);if(p)cells.push(p);}
     if(!cells.length)continue;
     const inSet=new Set(cells.map(c=>c[2]*64+c[3]));
@@ -915,9 +919,11 @@ function setBlock(id){
   $('#blocksel').value=id; pinned=null; $('#detail').classList.remove('pinned'); $('#detail').hidden=true; $('#mapscroll').scrollTop=0;
   drawMap(); writeHash();
 }
-const SHORTB={ascii:'ASCII',latin:'Latin',greek:'Greek',cyrillic:'Cyrillic',hebrew:'Hebrew',arabic:'Arabic',devanagari:'Devanagari',bengali:'Bengali',thai:'Thai',kana:'Kana',hangul:'Hangul',han:'Han',hanA:'Han Ext A',emoji:'Emoji',hanB:'Han Ext B'};
+// more scripts for the byte map's selector and overview (not in ByteMap.FEATURED: the Coverage tab and the paper's table keep their 15)
+const MORE=[['u530','Armenian'],['u10A0','Georgian'],['uD80','Sinhala'],['uF00','Tibetan'],['u1000','Myanmar'],['u1200','Ethiopic'],['u13A0','Cherokee'],['u1400','Canadian Syllabics'],['u1780','Khmer'],['u1800','Mongolian'],['uA000','Yi'],['u10000','Linear B'],['u10900','Phoenician'],['u11000','Brahmi'],['u12000','Cuneiform'],['u13000','Egyptian'],['u17000','Tangut'],['u1B170','Nushu'],['u1D400','Math']].filter(([id])=>ByteMap.BLOCK[id]);
+const SHORTB={...Object.fromEntries(MORE),ascii:'ASCII',latin:'Latin',greek:'Greek',cyrillic:'Cyrillic',hebrew:'Hebrew',arabic:'Arabic',devanagari:'Devanagari',bengali:'Bengali',thai:'Thai',kana:'Kana',hangul:'Hangul',han:'Han',hanA:'Han Ext A',emoji:'Emoji',hanB:'Han Ext B'};
 (function buildMapNav(){
-  $('#scriptchips').innerHTML='<button data-b="overview">All of Unicode</button>'+ByteMap.FEATURED.map(b=>`<button data-b="${b.id}" title="${b.name}: ${b.langs}">${SHORTB[b.id]||b.name}</button>`).join('');
+  $('#scriptchips').innerHTML='<button data-b="overview">All of Unicode</button>'+ByteMap.FEATURED.map(b=>`<button data-b="${b.id}" title="${b.name}: ${b.langs}">${SHORTB[b.id]||b.name}</button>`).join('')+'<span class="gsep" aria-hidden="true"></span>'+MORE.map(([id,n])=>`<button data-b="${id}" class="more" title="${ByteMap.BLOCK[id].name}">${n}</button>`).join('');
   const opts=[...ByteMap.FEATURED.map(b=>[b.id,b.name]),...ByteMap.ALL.map(b=>[b.id,`${b.name} · ${U(b.lo)}–${b.hi.toString(16).toUpperCase()}`])];
   $('#blocklist').innerHTML=opts.map(([,t])=>`<option value="${t.replace(/"/g,'&quot;')}"></option>`).join('');
   const byText=new Map(opts.map(([id,t])=>[t,id]));
