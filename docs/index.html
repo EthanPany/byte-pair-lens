@@ -225,6 +225,13 @@ td.hex,td.num,.mono{font-family:var(--mono);font-size:.82rem}
 .btn:hover{background:var(--fg);color:var(--bg)}
 .covsum{font-size:1rem;max-width:80ch;margin:10px 0 12px}
 .covchartwrap{border:1px solid var(--line);padding:8px 8px 4px;margin-bottom:10px;position:relative}
+.barctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 10px}
+.barctl .pills{gap:0}.barctl .pills button+button{margin-left:-1px}
+.barctl .btn[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
+.barsay{color:var(--muted);font-size:.88rem;margin-left:6px}
+.barwrap{position:relative;margin-bottom:10px}
+.barwrap canvas{display:block;width:100%;cursor:crosshair}
+.mlegend .pat::before{background:var(--c)}
 .covtip{position:absolute;pointer-events:none;z-index:5;background:var(--bg);border:1px solid var(--fg);padding:7px 10px;font-size:.8rem;white-space:nowrap}
 .covtip table{border-collapse:collapse;margin-top:3px}.covtip td,.covtip th{padding:1px 10px 1px 0;text-align:left;font-weight:400}.covtip th{color:var(--muted);font-size:.72rem}
 .covtip td:nth-child(n+4),.covtip th:nth-child(n+4){text-align:right;font-family:var(--mono);padding-right:0;padding-left:8px}
@@ -415,8 +422,10 @@ if(new URLSearchParams(location.search).get('design')==='tofu'){document.documen
       <p id="covsummary" class="covsum"></p>
       <div class="covchartwrap"><canvas id="covchart" aria-label="Cumulative share of text against frequency rank"></canvas><div id="covtip" class="covtip" hidden></div></div>
       <div class="mlegend" id="covlegend"></div>
-      <div id="covbody"><h2 style="margin-top:28px" id="covsplittitle">Most frequent characters that get split</h2>
-      <div class="tbl"><table id="covsplit"></table></div></div>
+      <div id="covbody"><h2 style="margin-top:28px" id="covsplittitle">Most frequent characters, in order</h2>
+      <div class="barctl"><div class="pills" id="barrange" role="radiogroup" aria-label="How many characters"><button role="radio" data-n="top" aria-checked="true">Top 1,000</button><button role="radio" data-n="all" aria-checked="false">All</button></div><button id="baronly" class="btn" aria-pressed="false" title="Leave out the characters that are whole tokens">Only split</button><span class="barsay" id="barsay"></span></div>
+      <div class="barwrap"><canvas id="barcode" aria-label="One cell per character, most frequent first: whole token or split into bytes"></canvas><div id="bartip" class="covtip" hidden></div></div>
+      <div class="mlegend" id="barlegend"></div></div>
     </section>
   </div>
 
@@ -1152,7 +1161,7 @@ if(document.fonts&&document.fonts.addEventListener)document.fonts.addEventListen
 });
 function fbProgress(d,t){const on=t>0&&d<t;$('#fbtoast').hidden=!on;if(on){$('#fbnote').textContent=`Loading fonts ${d}/${t}`;$('#fbfill').style.width=(100*d/t)+'%';}} // a small toast above the tokenizer bar, on every tab; it covers nothing that is in use
 Fallback.onprogress=fbProgress;
-Fallback.onface=()=>{if(!mapInfo||mapInfo.overview)return;clearTimeout(fbDraw);fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);};
+Fallback.onface=()=>{if(currentTab()==='cov'&&barInfo){clearTimeout(barT);barT=setTimeout(drawBarcode,250);}if(!mapInfo||mapInfo.overview)return;clearTimeout(fbDraw);fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);};
 function fbView(){
   if(!Fallback.on||!mapInfo||mapInfo.overview)return;
   const {D,cell,headH}=mapInfo, r=$('#map').getBoundingClientRect(), box=$('#mapscroll').getBoundingClientRect();
@@ -1345,16 +1354,67 @@ function renderCovDetail(){
   $('#covscript').value=covScript;
   $('#covtitle').textContent=covSel.length>1?`${covSel.length} scripts, most frequent first`:`${blk.name}, most frequent first`;
   const name=encName();
-  if(!F){$('#covsummary').textContent=`No frequency data for ${blk.name}.`;covHover=null;drawCovChart();$('#covsplit').innerHTML='';return;}
+  if(!F){$('#covsummary').textContent=`No frequency data for ${blk.name}.`;covHover=null;drawCovChart();barInfo=null;$('#barcode').height=0;$('#barlegend').innerHTML=$('#barsay').textContent='';return;}
   const C=ByteMap.coverage(V,blk,F);
   const splitIdx=[];for(let i=0;i<F.chars.length&&splitIdx.length<20;i++)if(!C.isWhole[i])splitIdx.push(i);
   const first=splitIdx.length?splitIdx[0]:-1;
   const pc=v=>(100*v).toFixed(1)+'%';
   $('#covsummary').innerHTML=`<b>${esc(name)}</b> keeps <b>${C.whole.toLocaleString()}</b> of ${C.assigned.toLocaleString()} ${covSel.length>1?esc(SHORTB[blk.id]||blk.name)+' ':''}characters whole, and <b>${pc(C.topWhole)}</b> of the ${C.topN.toLocaleString()} most frequent.`+(first>=0?` The most frequent one it splits is <b>${Fallback.html(F.chars[first][0])}</b>, at rank ${first+1}.`:'')+(F.total<10000?` Only ${F.total.toLocaleString()} samples, so treat this as rough.`:'');
   covHover=null; $('#covtip').hidden=true; drawCovChart();
-  $('#covsplittitle').textContent=covSel.length>1?`Most frequent ${SHORTB[blk.id]||blk.name} characters that get split`:'Most frequent characters that get split';
-  $('#covsplit').innerHTML=splitIdx.length?'<thead><tr><th>Rank</th><th>Character</th><th>Share of text</th><th>Tokens</th><th>Pieces</th></tr></thead><tbody>'+splitIdx.map(i=>{const [cp,c]=F.chars[i];const ch=String.fromCodePoint(cp);const ids=V.splitChar(ch);return `<tr><td>${i+1}</td><td class="txt">${Fallback.html(cp,ch)}</td><td>${(100*c/F.total).toFixed(3)}%</td><td>${ids.length}</td><td>${ids.map(id=>V.text[id]===null?'<span class="inv">'+hex(V.bytes[id])+'</span>':V.text[id]).join(' ')}</td></tr>`;}).join('')+'</tbody>':'<tbody><tr><td class="loading">None. Every character in the sample is a whole token.</td></tr></tbody>';
+  $('#covsplittitle').textContent=`Most frequent ${covSel.length>1?esc(SHORTB[blk.id]||blk.name)+' ':''}characters, in order`;
+  drawBarcode();
 }
+// The barcode of Figure 1: one cell per character of the described script, most frequent first, blue when the
+// character is a whole token and a warm colour per split pattern (2+1: a two-byte token then a one-byte one).
+const BARPAL=['#e8590c','#c2255c','#862e9c','#f08c00','#a61e4d','#5f3dc4','#d9480f','#7a4a12'];
+let barAll=false, barOnly=false, barInfo=null, barT=null;
+function barPattern(C,F,i){ // index into C.pats; 0 = whole
+  if(C.isWhole[i])return 0;
+  if(!C.pat){C.pat=new Uint8Array(F.chars.length).fill(255);C.pats=['whole'];}
+  if(C.pat[i]===255){
+    const key=V.splitChar(String.fromCodePoint(F.chars[i][0])).map(id=>V.bytes[id].length).join('+');
+    let k=C.pats.indexOf(key); if(k<0){k=C.pats.length;C.pats.push(key);} C.pat[i]=Math.min(k,254);
+  }
+  return C.pat[i];
+}
+function drawBarcode(){
+  if(!V||!covScript||!FREQ.scripts[covScript])return;
+  const F=FREQ.scripts[covScript], C=ByteMap.coverage(V,ByteMap.BLOCK[covScript],F);
+  const N=barAll?F.chars.length:Math.min(1000,F.chars.length), items=[]; const count=new Map();
+  for(let i=0;i<N;i++){const k=barPattern(C,F,i);count.set(k,(count.get(k)||0)+1);if(!(barOnly&&k===0))items.push(i);}
+  const cv=$('#barcode'), W=Math.max(300,cv.parentNode.clientWidth), cell=W>=900?18:15, cols=Math.max(1,Math.floor((W+1)/(cell+1))), rows=Math.ceil(items.length/cols)||1, H=rows*(cell+1);
+  const dpr=Math.min(window.devicePixelRatio||1,Math.sqrt(16e6/(W*H)));
+  cv.width=Math.floor(W*dpr); cv.height=Math.floor(H*dpr); cv.style.height=H+'px'; const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr);
+  const cW=cssVar('--whole'), cBg=cssVar('--bg'), sans=cssVar('--sans'), order=[...count.keys()].filter(k=>k).sort((a,b)=>count.get(b)-count.get(a)), col=k=>k===0?cW:BARPAL[order.indexOf(k)%BARPAL.length];
+  ctx.clearRect(0,0,W,H); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font=`${cell-6}px ${sans}`;
+  const cps=[];
+  items.forEach((i,n)=>{
+    const x=(n%cols)*(cell+1), y=Math.floor(n/cols)*(cell+1), cp=F.chars[i][0], ch=String.fromCodePoint(cp);
+    ctx.fillStyle=col(barPattern(C,F,i)); box(ctx,x,y,cell,cell,Math.max(2,cell*.2));
+    cps.push(cp); if(KIND(ch)||Fallback.missing(cp)||Fallback.waiting(cp))return;
+    ctx.fillStyle=cBg; ctx.fillText(MARK.test(ch)?'◌'+ch:ch,x+cell/2,y+cell/2+1,cell);
+  });
+  Fallback.need(cps);
+  barInfo={items,cols,cell,F,C,col};
+  const split=N-(count.get(0)||0);
+  $('#barsay').textContent=`${N.toLocaleString()} characters: ${(count.get(0)||0).toLocaleString()} whole, ${split.toLocaleString()} split`;
+  $('#barrange').querySelectorAll('button').forEach(b=>b.setAttribute('aria-checked',String((b.dataset.n==='all')===barAll)));
+  $('#baronly').setAttribute('aria-pressed',String(barOnly));
+  $('#barlegend').innerHTML=`<span class="whole">whole token · ${(count.get(0)||0).toLocaleString()}</span>`+order.map(k=>`<span class="pat" style="--c:${col(k)}" title="Bytes per token, in order">split ${C.pats[k]} · ${count.get(k).toLocaleString()}</span>`).join('');
+}
+function barTip(ev){
+  const tip=$('#bartip'); if(!ev||!barInfo){tip.hidden=true;return;}
+  const {items,cols,cell,F,C,col}=barInfo, cv=$('#barcode'), r=cv.getBoundingClientRect();
+  const c=Math.floor((ev.clientX-r.left)/(cell+1)), row=Math.floor((ev.clientY-r.top)/(cell+1)), i=items[row*cols+c];
+  if(c<0||c>=cols||i===undefined){tip.hidden=true;return;}
+  const [cp,n]=F.chars[i], ch=String.fromCodePoint(cp), ids=V.splitChar(ch), k=barPattern(C,F,i);
+  tip.innerHTML=`<b>Rank ${(i+1).toLocaleString()}</b> · ${(100*n/F.total).toFixed(3)}% of text<table><tbody><tr><td class="txt" style="font-size:1.5rem;padding-right:14px">${Fallback.html(cp,(MARK.test(ch)?'◌':'')+ch)}</td><td>${k===0?'one whole token':'split '+C.pats[k]+', '+ids.length+' tokens'}<br><span style="font-family:var(--mono)">${ids.map(id=>V.text[id]===null?hex(V.bytes[id]):esc(V.text[id])).join('  |  ')}</span></td></tr></tbody></table>`;
+  tip.hidden=false; const wr=cv.parentNode.getBoundingClientRect(), x=ev.clientX-wr.left, tw=tip.offsetWidth;
+  tip.style.left=(x+14+tw>wr.width?Math.max(0,x-14-tw):x+14)+'px'; tip.style.top=(ev.clientY-wr.top+16)+'px';
+}
+$('#barcode').addEventListener('mousemove',barTip); $('#barcode').addEventListener('mouseleave',()=>barTip(null));
+$('#barrange').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;barAll=b.dataset.n==='all';drawBarcode();});
+$('#baronly').addEventListener('click',()=>{barOnly=!barOnly;drawBarcode();});
 async function renderCoverage(){
   if($('#pane-cov').hidden||!V)return;
   try{await loadCoverage();}catch(e){Loader.fail(e.message,renderCoverage);return;}
@@ -1382,7 +1442,7 @@ $('#covchips').addEventListener('click',e=>{const b=e.target.closest('button[dat
   covApply();});
 $('#covchart').addEventListener('mousemove',covTip);$('#covchart').addEventListener('mouseleave',()=>covTip(null));
 $('#covcsv').addEventListener('click',async()=>{const a=document.createElement('a');a.href=await dataURL('coverage.csv');a.download='tofu-coverage.csv';document.body.append(a);a.click();a.remove();});
-window.addEventListener('resize',()=>{if(V&&!$('#pane-cov').hidden&&COV&&FREQ)drawCovChart();});
+window.addEventListener('resize',()=>{if(V&&!$('#pane-cov').hidden&&COV&&FREQ){drawCovChart();drawBarcode();}});
 
 /* ---- Merge tree (vocab browser) ---- */
 function treeLabel(id){const t=V.text[id];return t===null?hex(V.bytes[id]):t.replace(/\n/g,'⏎').replace(/\t/g,'⇥').replace(/ /g,'␣');}
