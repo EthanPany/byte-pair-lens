@@ -178,6 +178,9 @@ td.hex,td.num,.mono{font-family:var(--mono);font-size:.82rem}
 .viewseg{margin:0 0 0 auto;gap:0}
 .zoomseg:not([hidden])+.viewseg{margin-left:0}
 .zoomseg button{min-width:var(--h);justify-content:center;font-size:1.05rem}
+.fbwait{display:inline-block;width:.62em;height:.62em;margin:0 .14em;vertical-align:-.02em;border:.09em solid var(--line);border-top-color:var(--muted);border-radius:50%;animation:fbspin .8s linear infinite}
+@keyframes fbspin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.fbwait{animation:none;border-style:dotted}}
 .fbtoast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:25;display:flex;align-items:center;gap:10px;min-width:230px;padding:9px 14px;background:var(--fg);color:var(--bg);font-weight:600;font-size:.88rem;box-shadow:0 6px 24px rgba(17,17,17,.25);pointer-events:none}
 .fbtoast[hidden]{display:none}
 .fbtoast::before{content:"";width:9px;height:9px;flex:none;border-radius:50%;background:var(--bg);animation:fbpulse 1s ease-in-out infinite}
@@ -821,6 +824,7 @@ const Fallback=(function(){
     idx=j.slices; table=new Uint16Array(0x110000);
     idx.forEach((s,k)=>{for(let i=0;i<s.r.length;i+=2)for(let cp=s.r[i],e=cp+s.r[i+1];cp<e;cp++)if(!table[cp])table[cp]=k+1;});
     if(mode==='all')idx.forEach((s,k)=>register(k));
+    settle();
   }
   // make the characters drawable; resolves to true when a font arrived that was not there before.
   // Slices queue in the order the characters were given (the map passes the rows on screen, top first), the latest
@@ -848,11 +852,11 @@ const Fallback=(function(){
     const s=idx[f.k], r=[]; for(let i=0;i<s.r.length;i+=2){const a=s.r[i],b=a+s.r[i+1]-1;r.push('U+'+a.toString(16)+(b>a?'-'+b.toString(16):''));}
     f.status='loading'; active++;
     bytesOf(`fonts/fb/${s.f}?v=${s.v}${f.tries?'&try='+f.tries:''}`).then(buf=>new FontFace(FAM,buf,{unicodeRange:r.join(','),display:'swap'}).load()).then(face=>{
-      document.fonts.add(face); f.status='loaded'; active--; done++; tick(); hook(); f.done(1); pump();
+      document.fonts.add(face); f.status='loaded'; active--; done++; tick(); hook(); settle(); f.done(1); pump();
     },()=>{
       active--;
       if(f.tries<2){f.tries++;f.status='loading';setTimeout(()=>{f.status='queued';queue.unshift(f);pump();},1200*f.tries);hook();pump();return;} // empty cells until the retry
-      f.status='error'; done++; tick(); hook(); f.done(0); pump();
+      f.status='error'; done++; tick(); hook(); settle(); f.done(0); pump();
     });
   }
   const cpsOf=str=>{const a=[];for(const ch of str){const cp=ch.codePointAt(0);if(cp>=0x250)a.push(cp);if(a.length>4000)break;}return a;};
@@ -872,6 +876,42 @@ const Fallback=(function(){
     const k=table[cp]; if(!k)return false; const f=faces[k-1]; return (!f||f.status!=='loaded'&&f.status!=='error')&&hasGlyph(cp)===false;
   }
   const nog=cp=>{const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2);return `<span class="nog" title="No open font draws this character yet, so its code point is shown">${h.slice(0,m)}<br>${h.slice(m)}</span>`;};
+  // one character for the page (cards, tables): itself, its code point when no font exists, or a small spinner
+  // while its slice is on the way. A spinner is swapped for the result by settle() when the slice lands.
+  function html(cp,ch){
+    if(missing(cp))return nog(cp);
+    if(waiting(cp)){need([cp]);return `<span class="fbwait" data-cp="${cp}" title="Font on its way"></span>`;}
+    return esc(ch===undefined?String.fromCodePoint(cp):ch);
+  }
+  function settle(){
+    const again=[];
+    for(const e of document.querySelectorAll('.fbwait')){
+      const cp=+e.dataset.cp; if(waiting(cp)){again.push(cp);continue;}
+      const t=document.createElement('template'), ch=String.fromCodePoint(cp);
+      t.innerHTML=missing(cp)?nog(cp):esc((/^\p{M}$/u.test(ch)?'◌':'')+ch); e.replaceWith(t.content);
+    }
+    if(again.length&&idx)need(again);
+  }
+  // quietly save, for later, the slices this machine lacks: the scripts on the selector first, 12 MB at most, never
+  // on a metered or slow line, one at a time and only while nothing else is downloading
+  async function prefetch(first){
+    try{
+      const c=navigator.connection||{}; if(!idx||!('caches' in window)||c.saveData||c.type==='cellular'||/(^|-)[23]g$/.test(c.effectiveType||''))return;
+      const rank=s=>{const i=first.findIndex(([lo,hi])=>s.r[0]>=lo&&s.r[0]<=hi);return i<0?1e6:i;}; // first: [lo,hi] ranges, most wanted first
+      const order=idx.map((s,k)=>k).sort((a,b)=>rank(idx[a])-rank(idx[b])||a-b); let spent=0;
+      const store=await caches.open('bpl-fonts-v1');
+      for(const k of order){
+        const s=idx[k]; if(faces[k]&&faces[k].status!=='unloaded')continue;
+        if(mode==='probe'&&hasGlyph(s.r[0])!==false)continue; // this machine draws it already
+        const url=`fonts/fb/${s.f}?v=${s.v}`; if(await store.match(url))continue;
+        while(active||queue.length)await new Promise(r=>setTimeout(r,1500));
+        const r=await fetch(url,{priority:'low'}).catch(()=>null); if(!r||!r.ok)continue;
+        const b=await r.clone().arrayBuffer(); await store.put(url,r).catch(()=>{});
+        spent+=b.byteLength; if(spent>12e6)return;
+        await new Promise(r=>setTimeout(r,150));
+      }
+    }catch(e){}
+  }
   // text placed in the page by any tab: look at what was added and fetch what it needs
   let pend=null; const seen=new Set();
   function watch(root){
@@ -879,7 +919,7 @@ const Fallback=(function(){
       if(!pend)pend=setTimeout(()=>{pend=null;const els=[...seen];seen.clear();for(const el of els)if(el&&el.isConnected)need(cpsOf(el.textContent||''));},120);
     }).observe(root,{childList:true,subtree:true,characterData:true});
   }
-  return {init,fail(){failed=true;},need,missing,waiting,nog,watch,cpsOf,set onface(f){hook=f;},set onprogress(f){prog=f;},get on(){return !!idx;}};
+  return {init,fail(){failed=true;settle();},need,missing,waiting,nog,html,settle,prefetch,watch,cpsOf,set onface(f){hook=f;},set onprogress(f){prog=f;},get on(){return !!idx;}};
 })();
 // characters with nothing to draw: say what they are instead of showing a missing-glyph box
 const KIND=ch=>/^\p{Cc}$/u.test(ch)?'control character':/^\p{Cf}$/u.test(ch)?'format character':/^[\p{Zs}\p{Zl}\p{Zp}]$/u.test(ch)?'space':null;
@@ -942,7 +982,7 @@ function drawOverview(){
     }
   }
   ctx.stroke(); ctx.globalAlpha=1;
-  for(const b of [...ByteMap.FEATURED,...MORE.map(([id])=>ByteMap.BLOCK[id])].sort((p,q)=>(q.hi-q.lo)-(p.hi-p.lo))){
+  for(const b of [...ByteMap.FEATURED,...MORE.map(([id])=>ByteMap.BLOCK[id]),...OVLABEL.map(([id])=>ByteMap.BLOCK[id])].sort((p,q)=>(q.hi-q.lo)-(p.hi-p.lo))){
     const cells=[]; for(let g=b.lo>>6;g<=b.hi>>6;g++){const p=pos.get(g);if(p)cells.push(p);}
     if(!cells.length)continue;
     const inSet=new Set(cells.map(c=>c[2]*64+c[3]));
@@ -994,7 +1034,7 @@ function unpin(){pinned=null;$('#detail').classList.remove('pinned');$('#detail'
 function showGroup(g){
   const O=mapInfo.O, lo=g<<6, hi=lo+63, blk=ByteMap.blockOf(lo);
   const A=assignedBits(), sample=[];
-  for(let cp=lo;cp<=hi&&sample.length<8;cp++){const ch=String.fromCodePoint(cp);if(A[cp]&&!ByteMap.NONCHAR.test(ch)&&!KIND(ch))sample.push(Fallback.missing(cp)?Fallback.nog(cp):esc((MARK.test(ch)?'◌':'')+ch));}
+  for(let cp=lo;cp<=hi&&sample.length<8;cp++){const ch=String.fromCodePoint(cp);if(A[cp]&&!ByteMap.NONCHAR.test(ch)&&!KIND(ch))sample.push(Fallback.html(cp,(MARK.test(ch)?'◌':'')+ch));}
   let n=0;for(let cp=lo;cp<=hi;cp++)if(A[cp]&&Fallback.missing(cp))n++;
   const head=n&&n>=O.assigned[g]?'<div class="big kind">no open font draws these yet</div>':`<div class="big sm">${sample.join('')}</div>`;
   $('#detail').innerHTML=`${head}<dl><dt>Block</dt><dd class="plain">${blk?blk.name:'–'}</dd><dt>Range</dt><dd>${U(lo)}–${hi.toString(16).toUpperCase()}</dd><dt>Whole tokens</dt><dd>${O.whole[g]} of ${O.assigned[g]}</dd></dl><div class="foot">Click to zoom in</div>`;
@@ -1010,7 +1050,9 @@ function setBlock(id){
 }
 // more scripts for the byte map's selector and overview (not in ByteMap.FEATURED: the Coverage tab and the paper's table keep their 15)
 const MORE=[['u530','Armenian'],['u10A0','Georgian'],['uD80','Sinhala'],['uF00','Tibetan'],['u1000','Myanmar'],['u1200','Ethiopic'],['u13A0','Cherokee'],['u1400','Canadian Syllabics'],['u1780','Khmer'],['u16A0','Runic'],['u1800','Mongolian'],['u2800','Braille'],['uA000','Yi'],['u10000','Linear B'],['u10900','Phoenician'],['u11000','Brahmi'],['u12000','Cuneiform'],['u13000','Egyptian'],['u13460','Egyptian Ext A'],['u17000','Tangut'],['u1B170','Nushu'],['u1D400','Math']].filter(([id])=>ByteMap.BLOCK[id]);
-const SHORTB={...Object.fromEntries(MORE),ascii:'ASCII',latin:'Latin',greek:'Greek',cyrillic:'Cyrillic',hebrew:'Hebrew',arabic:'Arabic',devanagari:'Devanagari',bengali:'Bengali',thai:'Thai',kana:'Kana',hangul:'Hangul',han:'Han',hanA:'Han Ext A',emoji:'Emoji',hanB:'Han Ext B'};
+// named on the overview only (no chip): the Han extensions past B
+const OVLABEL=[['u2A700','Han Ext C'],['u2B820','Han Ext E'],['u2CEB0','Han Ext F'],['u30000','Han Ext G'],['u31350','Han Ext H'],['u2EBF0','Han Ext I'],['u323B0','Han Ext J']].filter(([id])=>ByteMap.BLOCK[id]);
+const SHORTB={...Object.fromEntries(OVLABEL),...Object.fromEntries(MORE),ascii:'ASCII',latin:'Latin',greek:'Greek',cyrillic:'Cyrillic',hebrew:'Hebrew',arabic:'Arabic',devanagari:'Devanagari',bengali:'Bengali',thai:'Thai',kana:'Kana',hangul:'Hangul',han:'Han',hanA:'Han Ext A',emoji:'Emoji',hanB:'Han Ext B'};
 (function buildMapNav(){
   $('#scriptchips').innerHTML='<button data-b="overview">All of Unicode</button>'+ByteMap.FEATURED.map(b=>`<button data-b="${b.id}" title="${b.name}: ${b.langs}">${SHORTB[b.id]||b.name}</button>`).join('')+'<span class="gsep" aria-hidden="true"></span>'+MORE.map(([id,n])=>`<button data-b="${id}" class="more" title="${ByteMap.BLOCK[id].name}">${n}</button>`).join('');
   const opts=[...ByteMap.FEATURED.map(b=>[b.id,b.name]),...ByteMap.ALL.map(b=>[b.id,`${b.name} · ${U(b.lo)}–${b.hi.toString(16).toUpperCase()}`])];
@@ -1080,7 +1122,7 @@ function drawMap(){
           if(cell>=12){const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2),fs=Math.max(4.4,cell*.34);ctx.font=`${fs}px ${mono}`;ctx.fillText(h.slice(0,m),cx,y+cell/2-fs*.5+.5,cell-2);ctx.fillText(h.slice(m),cx,y+cell/2+fs*.5+.5,cell-2);ctx.font=`${cell-6}px ${sans}`;}
           else{const q=Math.max(2,Math.round(cell/7));ctx.fillRect(cx-q/2,y+cell/2-q/2,q,q);}
           ctx.globalAlpha=1;continue;}
-        if(Fallback.waiting(cp))continue;
+        if(Fallback.waiting(cp)){const cx=LABELW+c*(cell+GAP)+cell/2;ctx.globalAlpha=.45;ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=1;ctx.beginPath();ctx.arc(cx,y+cell/2,Math.max(1.5,cell*.16),0,4.6);ctx.stroke();ctx.globalAlpha=1;continue;} // font on its way: an open ring
         ctx.fillText(MARK.test(ch)?'◌'+ch:ch,LABELW+c*(cell+GAP)+cell/2,y+cell/2+1,cell);
       }
     }
@@ -1127,7 +1169,7 @@ function cellAt(ev){
   if(x<0||y<0)return null; const c=Math.floor(x/(cell+GAP)), row=Math.floor(y/(cell+GAP));
   if(c<0||c>63||row<0||row>=D.rows||!D.state[row*64+c])return null; return ((D.r0+row)<<6)|c;
 }
-const bigGlyph=(cp,ch)=>`<div class="big">${Fallback.missing(cp)?Fallback.nog(cp):(MARK.test(ch)?'◌':'')+esc(ch)}</div>`;
+const bigGlyph=(cp,ch)=>`<div class="big">${Fallback.html(cp,(MARK.test(ch)?'◌':'')+ch)}</div>`;
 function showDetailSide(cp){ // the fields of the paper's figure
   const ch=String.fromCodePoint(cp), b=encU.encode(ch), kind=KIND(ch), F=fragFor(curEnc);
   let status, pieces;
@@ -1280,7 +1322,7 @@ function covTip(ev){
   if(rank!==covHover){covHover=rank;drawCovChart();}
   const pc=v=>(100*v).toFixed(1)+'%';
   const rows=S.filter(q=>rank<=q.F.chars.length).map(q=>{const i=rank-1, ch=String.fromCodePoint(q.F.chars[i][0]);
-    return `<tr><td><i style="background:${multi?covColour(q.id):'var(--whole)'}"></i>${esc(q.name)}</td><td class="txt">${esc(ch)}</td><td>${q.C.isWhole[i]?'whole':'split'}</td><td>${pc(q.C.cumW[i])}</td><td>${pc(q.C.cumA[i])}</td></tr>`;}).join('');
+    return `<tr><td><i style="background:${multi?covColour(q.id):'var(--whole)'}"></i>${esc(q.name)}</td><td class="txt">${Fallback.html(q.F.chars[i][0],ch)}</td><td>${q.C.isWhole[i]?'whole':'split'}</td><td>${pc(q.C.cumW[i])}</td><td>${pc(q.C.cumA[i])}</td></tr>`;}).join('');
   tip.innerHTML=`<b>Rank ${rank.toLocaleString()}</b><table><thead><tr><th></th><th></th><th></th><th>whole</th><th>all</th></tr></thead><tbody>${rows||'<tr><td>No script has this many characters.</td></tr>'}</tbody></table>`;
   tip.hidden=false; const wr=cv.parentNode.getBoundingClientRect(), x=ev.clientX-wr.left, tw=tip.offsetWidth;
   tip.style.left=(x+14+tw>wr.width?Math.max(0,x-14-tw):x+14)+'px'; tip.style.top=Math.max(4,Math.min(wr.height-tip.offsetHeight-4,ev.clientY-wr.top-20))+'px';
@@ -1308,10 +1350,10 @@ function renderCovDetail(){
   const splitIdx=[];for(let i=0;i<F.chars.length&&splitIdx.length<20;i++)if(!C.isWhole[i])splitIdx.push(i);
   const first=splitIdx.length?splitIdx[0]:-1;
   const pc=v=>(100*v).toFixed(1)+'%';
-  $('#covsummary').innerHTML=`<b>${esc(name)}</b> keeps <b>${C.whole.toLocaleString()}</b> of ${C.assigned.toLocaleString()} ${covSel.length>1?esc(SHORTB[blk.id]||blk.name)+' ':''}characters whole, and <b>${pc(C.topWhole)}</b> of the ${C.topN.toLocaleString()} most frequent.`+(first>=0?` The most frequent one it splits is <b>${String.fromCodePoint(F.chars[first][0])}</b>, at rank ${first+1}.`:'')+(F.total<10000?` Only ${F.total.toLocaleString()} samples, so treat this as rough.`:'');
+  $('#covsummary').innerHTML=`<b>${esc(name)}</b> keeps <b>${C.whole.toLocaleString()}</b> of ${C.assigned.toLocaleString()} ${covSel.length>1?esc(SHORTB[blk.id]||blk.name)+' ':''}characters whole, and <b>${pc(C.topWhole)}</b> of the ${C.topN.toLocaleString()} most frequent.`+(first>=0?` The most frequent one it splits is <b>${Fallback.html(F.chars[first][0])}</b>, at rank ${first+1}.`:'')+(F.total<10000?` Only ${F.total.toLocaleString()} samples, so treat this as rough.`:'');
   covHover=null; $('#covtip').hidden=true; drawCovChart();
   $('#covsplittitle').textContent=covSel.length>1?`Most frequent ${SHORTB[blk.id]||blk.name} characters that get split`:'Most frequent characters that get split';
-  $('#covsplit').innerHTML=splitIdx.length?'<thead><tr><th>Rank</th><th>Character</th><th>Share of text</th><th>Tokens</th><th>Pieces</th></tr></thead><tbody>'+splitIdx.map(i=>{const [cp,c]=F.chars[i];const ch=String.fromCodePoint(cp);const ids=V.splitChar(ch);return `<tr><td>${i+1}</td><td class="txt">${ch}</td><td>${(100*c/F.total).toFixed(3)}%</td><td>${ids.length}</td><td>${ids.map(id=>V.text[id]===null?'<span class="inv">'+hex(V.bytes[id])+'</span>':V.text[id]).join(' ')}</td></tr>`;}).join('')+'</tbody>':'<tbody><tr><td class="loading">None. Every character in the sample is a whole token.</td></tr></tbody>';
+  $('#covsplit').innerHTML=splitIdx.length?'<thead><tr><th>Rank</th><th>Character</th><th>Share of text</th><th>Tokens</th><th>Pieces</th></tr></thead><tbody>'+splitIdx.map(i=>{const [cp,c]=F.chars[i];const ch=String.fromCodePoint(cp);const ids=V.splitChar(ch);return `<tr><td>${i+1}</td><td class="txt">${Fallback.html(cp,ch)}</td><td>${(100*c/F.total).toFixed(3)}%</td><td>${ids.length}</td><td>${ids.map(id=>V.text[id]===null?'<span class="inv">'+hex(V.bytes[id])+'</span>':V.text[id]).join(' ')}</td></tr>`;}).join('')+'</tbody>':'<tbody><tr><td class="loading">None. Every character in the sample is a whole token.</td></tr></tbody>';
 }
 async function renderCoverage(){
   if($('#pane-cov').hidden||!V)return;
@@ -1517,7 +1559,7 @@ const H=readHash(); const startEnc=[...$('#encsel').options].some(o=>o.value===H
     if(!(bitsFor(startEnc)&&currentTab()==='map'))await p.catch(()=>{}); // no bitmap, or a tab that needs the vocabulary: wait for it
     drawMap(); Loader.release();
     fbProgress(0,1);
-    getData('fallback.json').then(j=>{fbProgress(1,1);Fallback.init(j);Fallback.watch(document.body);Fallback.need(Fallback.cpsOf(document.body.textContent));if(currentTab()==='map')drawMap();}).catch(e=>{console.warn('fallback fonts',e);fbProgress(1,1);Fallback.fail();if(currentTab()==='map')drawMap();});
+    getData('fallback.json').then(j=>{fbProgress(1,1);Fallback.init(j);Fallback.watch(document.body);setTimeout(()=>Fallback.prefetch([...ByteMap.FEATURED,...MORE.map(([id])=>ByteMap.BLOCK[id])].map(b=>[b.lo,b.hi])),6000);Fallback.need(Fallback.cpsOf(document.body.textContent));if(currentTab()==='map')drawMap();}).catch(e=>{console.warn('fallback fonts',e);fbProgress(1,1);Fallback.fail();if(currentTab()==='map')drawMap();});
   });
 })();
 })();
