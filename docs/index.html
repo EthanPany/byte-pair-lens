@@ -728,6 +728,7 @@ const Fallback=(function(){
   const FAM='BPL Fallback';
   let idx=null, table=null, mode='probe', base='', tofu=null;
   const faces=[], glyph=new Map();
+  let hook=()=>{};
   const pc=document.createElement('canvas'); pc.width=pc.height=24;
   const px=pc.getContext('2d',{willReadFrequently:true});
   function sig(ch){ // what the system fonts draw for ch, as a hash of the pixels
@@ -764,16 +765,24 @@ const Fallback=(function(){
       if(faces[k-1].status==='unloaded')load.add(faces[k-1]);
     }
     if(!load.size)return Promise.resolve(false);
-    return Promise.all([...load].map(f=>f.load().then(()=>1,()=>0))).then(r=>r.some(Boolean));
+    return Promise.all([...load].map(f=>f.load().then(()=>{hook();return 1;},()=>{hook();return 0;}))).then(r=>r.some(Boolean)); // hook: each slice redraws the map as it lands or fails
   }
   const cpsOf=str=>{const a=[];for(const ch of str){const cp=ch.codePointAt(0);if(cp>=0x250)a.push(cp);if(a.length>4000)break;}return a;};
   // no system font and no slice (or the slice failed): the caller draws the code point instead
   function missing(cp){
-    if(!idx||mode!=='probe')return false;
+    if(!idx)return false;
     const k=table[cp]; if(k&&!(faces[k-1]&&faces[k-1].status==='error'))return false;
-    return hasGlyph(cp)===false;
+    if(mode==='probe')return hasGlyph(cp)===false;
+    // boxes cannot be told apart here (Firefox, Unifont): a character no slice covers is taken as having no font.
+    // Latin, private use, variation selectors and tags have no slices on purpose.
+    return cp>=0x250&&!(cp>=0xD800&&cp<=0xF8FF)&&!(cp>=0xFE00&&cp<=0xFE0F)&&!(cp>=0xE0000);
   }
-  const nog=cp=>{const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2);return `<span class="nog" title="No font has this character yet">${h.slice(0,m)}<br>${h.slice(m)}</span>`;};
+  // a slice for this character is on its way: the map leaves the cell empty until it arrives, so no box flashes
+  function waiting(cp){
+    if(!idx||mode!=='probe')return false;
+    const k=table[cp]; if(!k)return false; const f=faces[k-1]; return (!f||f.status==='unloaded'||f.status==='loading')&&hasGlyph(cp)===false;
+  }
+  const nog=cp=>{const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2);return `<span class="nog" title="No open font draws this character yet, so its code point is shown">${h.slice(0,m)}<br>${h.slice(m)}</span>`;};
   // text placed in the page by any tab: look at what was added and fetch what it needs
   let pend=null; const seen=new Set();
   function watch(root){
@@ -781,7 +790,7 @@ const Fallback=(function(){
       if(!pend)pend=setTimeout(()=>{pend=null;const els=[...seen];seen.clear();for(const el of els)if(el&&el.isConnected)need(cpsOf(el.textContent||''));},120);
     }).observe(root,{childList:true,subtree:true,characterData:true});
   }
-  return {init,need,missing,nog,watch,cpsOf,get on(){return !!idx;}};
+  return {init,need,missing,waiting,nog,watch,cpsOf,set onface(f){hook=f;},get on(){return !!idx;}};
 })();
 // characters with nothing to draw: say what they are instead of showing a missing-glyph box
 const KIND=ch=>/^\p{Cc}$/u.test(ch)?'control character':/^\p{Cf}$/u.test(ch)?'format character':/^[\p{Zs}\p{Zl}\p{Zp}]$/u.test(ch)?'space':null;
@@ -885,7 +894,7 @@ function showGroup(g){
   const A=assignedBits(), sample=[];
   for(let cp=lo;cp<=hi&&sample.length<8;cp++){const ch=String.fromCodePoint(cp);if(A[cp]&&!ByteMap.NONCHAR.test(ch)&&!KIND(ch))sample.push(Fallback.missing(cp)?Fallback.nog(cp):esc((MARK.test(ch)?'◌':'')+ch));}
   let n=0;for(let cp=lo;cp<=hi;cp++)if(A[cp]&&Fallback.missing(cp))n++;
-  const head=n&&n>=O.assigned[g]?'<div class="big kind">no font has these characters yet</div>':`<div class="big sm">${sample.join('')}</div>`;
+  const head=n&&n>=O.assigned[g]?'<div class="big kind">no open font draws these yet</div>':`<div class="big sm">${sample.join('')}</div>`;
   $('#detail').innerHTML=`${head}<dl><dt>Block</dt><dd class="plain">${blk?blk.name:'–'}</dd><dt>Range</dt><dd>${U(lo)}–${hi.toString(16).toUpperCase()}</dd><dt>Whole tokens</dt><dd>${O.whole[g]} of ${O.assigned[g]}</dd></dl><div class="foot">Click to zoom in</div>`;
 }
 function openGroup(g){
@@ -959,7 +968,12 @@ function drawMap(){
       const st=D.state[r*64+c]; if(!st)continue;
       const cp=((D.r0+r)<<6)|c, ch=String.fromCodePoint(cp); if(KIND(ch))continue;
       ctx.fillStyle=st===1?cBg:cFg;
-      if(Fallback.missing(cp)){const q=Math.max(2,Math.round(cell/7));ctx.globalAlpha=.45;ctx.fillRect(LABELW+c*(cell+GAP)+cell/2-q/2,y+cell/2-q/2,q,q);ctx.globalAlpha=1;continue;} // no font anywhere: a dot, the card gives the code point
+      if(Fallback.missing(cp)){ // no font anywhere: its code point in small type (a dot in cells under 15 px), never a box
+        const cx=LABELW+c*(cell+GAP)+cell/2; ctx.globalAlpha=.6;
+        if(cell>=15){const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2),fs=Math.max(5,cell*.34);ctx.font=`${fs}px ${mono}`;ctx.fillText(h.slice(0,m),cx,y+cell/2-fs*.5+.5,cell-2);ctx.fillText(h.slice(m),cx,y+cell/2+fs*.5+.5,cell-2);ctx.font=`${cell-6}px ${sans}`;}
+        else{const q=Math.max(2,Math.round(cell/7));ctx.fillRect(cx-q/2,y+cell/2-q/2,q,q);}
+        ctx.globalAlpha=1;continue;}
+      if(Fallback.waiting(cp))continue;
       ctx.fillText(MARK.test(ch)?'◌'+ch:ch,LABELW+c*(cell+GAP)+cell/2,y+cell/2+1,cell);
     }
   }
@@ -979,6 +993,7 @@ if(document.fonts&&document.fonts.addEventListener)document.fonts.addEventListen
   if(!(e.fontfaces||[]).some(f=>/BPL Fallback/.test(f.family))||!mapInfo||mapInfo.overview)return;
   clearTimeout(fbDraw); fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);
 });
+Fallback.onface=()=>{if(!mapInfo||mapInfo.overview)return;clearTimeout(fbDraw);fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);};
 function fbView(){
   if(!Fallback.on||!mapInfo||mapInfo.overview)return;
   const {D,cell,headH}=mapInfo, r=$('#map').getBoundingClientRect(), box=$('#mapscroll').getBoundingClientRect();
