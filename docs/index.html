@@ -738,7 +738,7 @@ const Fallback=(function(){
   const FAM='BPL Fallback';
   let idx=null, table=null, mode='probe', base='', tofu=null;
   const faces=[], glyph=new Map();
-  let hook=()=>{}, prog=()=>{}, total=0, done=0; const tries=[];
+  let hook=()=>{}, prog=()=>{}, total=0, done=0;
   const tick=()=>{prog(done,total);if(done>=total)total=done=0;};
   const pc=document.createElement('canvas'); pc.width=pc.height=24;
   const px=pc.getContext('2d',{willReadFrequently:true});
@@ -752,12 +752,14 @@ const Fallback=(function(){
     if(mode!=='probe')return null;
     let g=glyph.get(cp); if(g===undefined){g=!tofu.has(sig(String.fromCodePoint(cp)));glyph.set(cp,g);} return g;
   }
-  function register(k){
-    if(faces[k])return faces[k];
-    const t=tries[k]||0;
-    const s=idx[k], r=[]; for(let i=0;i<s.r.length;i+=2){const a=s.r[i],b=a+s.r[i+1]-1;r.push('U+'+a.toString(16)+(b>a?'-'+b.toString(16):''));}
-    const f=new FontFace(FAM,`url(fonts/fb/${s.f}?v=${s.v}${t?'&try='+t:''}) format("woff2")`,{unicodeRange:r.join(','),display:'swap'});
-    document.fonts.add(f); return faces[k]=f;
+  // one record per slice. The bytes are fetched by the page and kept in Cache Storage, so a second visit downloads
+  // nothing; the FontFace is made from the bytes once they are here.
+  function register(k){return faces[k]||(faces[k]={k,status:'unloaded',tries:0,wait:null});}
+  async function bytesOf(url){
+    let c=null; try{c=await caches.open('bpl-fonts-v1');const hit=await c.match(url);if(hit)return await hit.arrayBuffer();}catch(e){c=null;}
+    const r=await fetch(url); if(!r.ok)throw new Error('font '+r.status);
+    if(c)c.put(url,r.clone()).catch(()=>{});
+    return r.arrayBuffer();
   }
   // the probe needs no data, so it is ready before the index: until the index is here a character this machine
   // cannot draw is left empty (`waiting`), and if the index never comes it is drawn as its code point (`missing`)
@@ -775,26 +777,38 @@ const Fallback=(function(){
     idx.forEach((s,k)=>{for(let i=0;i<s.r.length;i+=2)for(let cp=s.r[i],e=cp+s.r[i+1];cp<e;cp++)if(!table[cp])table[cp]=k+1;});
     if(mode==='all')idx.forEach((s,k)=>register(k));
   }
-  // make the characters drawable; resolves to true when a font arrived that was not there before
+  // make the characters drawable; resolves to true when a font arrived that was not there before.
+  // Slices queue in the order the characters were given (the map passes the rows on screen, top first), the latest
+  // request goes to the front, and at most three download at a time, so a slow line fills the screen from the top.
+  const queue=[]; let active=0;
   function need(cps){
     if(!idx)return Promise.resolve(false);
-    const load=new Set();
+    const want=[];
     for(const cp of cps){
       const k=table[cp]; if(!k)continue;
-      if(!faces[k-1]){if(hasGlyph(cp)!==false)continue;register(k-1);}
-      if(faces[k-1].status==='unloaded')load.add(faces[k-1]);
+      let f=faces[k-1]; if(!f){if(hasGlyph(cp)!==false)continue;f=register(k-1);}
+      if((f.status==='unloaded'||f.status==='queued')&&!want.includes(f))want.push(f);
     }
-    if(!load.size)return Promise.resolve(false);
-    return Promise.all([...load].map(fetchFace)).then(r=>r.some(Boolean));
+    if(!want.length)return Promise.resolve(false);
+    for(const f of want){
+      if(f.status==='unloaded'){f.status='queued';total++;f.wait=new Promise(res=>{f.done=res;});}
+      else queue.splice(queue.indexOf(f),1);
+    }
+    queue.unshift(...want); tick(); pump();
+    return Promise.all(want.map(f=>f.wait)).then(r=>r.some(Boolean));
   }
+  function pump(){while(active<3&&queue.length){const f=queue.shift();if(f.status==='queued')fetchFace(f);}}
   // one slice: a slow host can drop a download, so a failed one is tried again (twice) before the characters count as having no font
   function fetchFace(f){
-    const k=faces.indexOf(f); total++; tick();
-    return f.load().then(()=>{done++;tick();hook();return 1;},()=>{
-      done++;
-      if((tries[k]||0)<2){tries[k]=(tries[k]||0)+1;document.fonts.delete(f);faces[k]=undefined;total++;
-        setTimeout(()=>{done++;fetchFace(register(k));},1200*tries[k]);}
-      tick();hook();return 0;});
+    const s=idx[f.k], r=[]; for(let i=0;i<s.r.length;i+=2){const a=s.r[i],b=a+s.r[i+1]-1;r.push('U+'+a.toString(16)+(b>a?'-'+b.toString(16):''));}
+    f.status='loading'; active++;
+    bytesOf(`fonts/fb/${s.f}?v=${s.v}${f.tries?'&try='+f.tries:''}`).then(buf=>new FontFace(FAM,buf,{unicodeRange:r.join(','),display:'swap'}).load()).then(face=>{
+      document.fonts.add(face); f.status='loaded'; active--; done++; tick(); hook(); f.done(1); pump();
+    },()=>{
+      active--;
+      if(f.tries<2){f.tries++;f.status='loading';setTimeout(()=>{f.status='queued';queue.unshift(f);pump();},1200*f.tries);hook();pump();return;} // empty cells until the retry
+      f.status='error'; done++; tick(); hook(); f.done(0); pump();
+    });
   }
   const cpsOf=str=>{const a=[];for(const ch of str){const cp=ch.codePointAt(0);if(cp>=0x250)a.push(cp);if(a.length>4000)break;}return a;};
   // no system font and no slice (or the slice failed): the caller draws the code point instead
@@ -810,7 +824,7 @@ const Fallback=(function(){
   function waiting(cp){
     if(!idx){if(failed||cp<0x250)return false;probe();return mode==='probe'&&hasGlyph(cp)===false;}
     if(mode!=='probe')return false;
-    const k=table[cp]; if(!k)return false; const f=faces[k-1]; return (!f||f.status==='unloaded'||f.status==='loading')&&hasGlyph(cp)===false;
+    const k=table[cp]; if(!k)return false; const f=faces[k-1]; return (!f||f.status!=='loaded'&&f.status!=='error')&&hasGlyph(cp)===false;
   }
   const nog=cp=>{const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2);return `<span class="nog" title="No open font draws this character yet, so its code point is shown">${h.slice(0,m)}<br>${h.slice(m)}</span>`;};
   // text placed in the page by any tab: look at what was added and fetch what it needs
