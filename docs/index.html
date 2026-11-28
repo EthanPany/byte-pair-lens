@@ -105,6 +105,7 @@ input[type=search]{flex:1;min-width:160px}
 .mlegend .whole::before{background:var(--whole)}
 .mlegend .none::before{background:var(--split)}
 .mlegend .empty::before{background:var(--bg);outline:1px dashed #bbb;outline-offset:-1px}
+.mlegend .empty.blank::before{outline:0;width:0;margin:0}
 .mlegend .cumall::before{background:var(--muted);height:2px;vertical-align:3px}
 .mlegend .tip{color:var(--fg)}
 .mlegend .tip::before{display:none}
@@ -154,6 +155,9 @@ td.hex,td.num,.mono{font-family:var(--mono);font-size:.82rem}
 .mlegend.maplegend{margin-bottom:10px}
 .mlegend .fragrow::before{width:3px;background:var(--frag)}
 .viewseg{margin:0 0 0 auto;gap:0}
+.zoomseg:not([hidden])+.viewseg{margin-left:0}
+.zoomseg button{min-width:var(--h);justify-content:center;font-size:1.05rem}
+.fbbar{height:3px;margin-bottom:2px;background:transparent;overflow:hidden}.fbbar i{display:block;height:100%;width:0;background:var(--fg);transition:width .25s}.fbbar:not(.on) i{opacity:0}
 .viewseg button+button{margin-left:-1px}
 .viewseg:not([hidden])+input{margin-left:0}
 /* Detailed view: the block map as in the paper's figure, with the detail in a panel beside it */
@@ -304,11 +308,14 @@ if(new URLSearchParams(location.search).get('design')==='tofu'){document.documen
         <div class="scriptchips" id="scriptchips" role="group" aria-label="Scripts"></div>
       </div>
       <div class="mlegend maplegend"><span class="whole" id="lgwhole">one whole token</span><span class="none" id="lgsplit">split into bytes</span><span class="fragrow" id="lgfrag" hidden>row prefix is a fragment token</span><span class="empty" id="lgempty" title="Unassigned, or outside this block">no character</span><span class="tip" id="maptip"></span>
+        <span class="tip" id="fbnote" role="status" hidden></span>
+        <div class="pills viewseg zoomseg" id="zoomseg" role="group" aria-label="Cell size" hidden><button id="zout" title="Smaller cells" aria-label="Smaller cells">−</button><button id="zin" title="Larger cells" aria-label="Larger cells">+</button></div>
         <div class="pills viewseg" id="viewseg" role="radiogroup" aria-label="View" hidden><button role="radio" data-v="compact" aria-checked="true" title="The 64 columns fitted to the page">Compact</button><button role="radio" data-v="detailed" aria-checked="false" title="Larger characters, a side panel, and a red mark on rows whose byte prefix is itself a token">Detailed</button></div>
         <input type="search" id="blocksearch" list="blocklist" placeholder="Find any Unicode block…" aria-label="Jump to a Unicode block">
         <datalist id="blocklist"></datalist>
       </div>
       <div class="mapwrap" id="mapwrap">
+        <div class="fbbar" id="fbbar" aria-hidden="true"><i></i></div>
         <div class="mapscroll over" id="mapscroll"><canvas id="map"></canvas></div>
         <div class="detail" id="detail" hidden></div>
       </div>
@@ -710,10 +717,15 @@ function fragFor(enc){
 }
 const LABELW=64, GAP=1;
 function cssVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+<<<<<<< HEAD
 const TOFU=document.documentElement.dataset.design==='tofu'; // the second design: rounded cells, colour and motion from design-tofu.js
 function box(ctx,x,y,w,h,r){if(TOFU&&ctx.roundRect){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill();}else ctx.fillRect(x,y,w,h);}
 const fxDo=(m,a)=>{if(TOFU&&window.TofuFX)window.TofuFX[m](a);};
 function cellSize(block){const w=$('#mapscroll').clientWidth-(block?16:0);return Math.max(13,Math.min(22,Math.floor((w-LABELW-2)/64)-GAP));}
+=======
+let mapZoom=0; // Compact block view: cells this many px larger (or smaller) than the fitted size
+function cellSize(block){const w=$('#mapscroll').clientWidth-(block?16:0), fit=Math.max(13,Math.min(22,Math.floor((w-LABELW-2)/64)-GAP));return block?Math.max(9,Math.min(44,fit+mapZoom)):fit;}
+>>>>>>> fonts-full
 function sizeCanvas(W,H){
   const cv=$('#map');
   const dpr=Math.min(window.devicePixelRatio||1, Math.sqrt(16e6/(W*H))); // Safari caps canvas area near 16 Mpx
@@ -728,7 +740,8 @@ const Fallback=(function(){
   const FAM='BPL Fallback';
   let idx=null, table=null, mode='probe', base='', tofu=null;
   const faces=[], glyph=new Map();
-  let hook=()=>{};
+  let hook=()=>{}, prog=()=>{}, total=0, done=0; const tries=[];
+  const tick=()=>{prog(done,total);if(done>=total)total=done=0;};
   const pc=document.createElement('canvas'); pc.width=pc.height=24;
   const px=pc.getContext('2d',{willReadFrequently:true});
   function sig(ch){ // what the system fonts draw for ch, as a hash of the pixels
@@ -743,8 +756,9 @@ const Fallback=(function(){
   }
   function register(k){
     if(faces[k])return faces[k];
+    const t=tries[k]||0;
     const s=idx[k], r=[]; for(let i=0;i<s.r.length;i+=2){const a=s.r[i],b=a+s.r[i+1]-1;r.push('U+'+a.toString(16)+(b>a?'-'+b.toString(16):''));}
-    const f=new FontFace(FAM,`url(fonts/fb/${s.f}?v=${s.v}) format("woff2")`,{unicodeRange:r.join(','),display:'swap'});
+    const f=new FontFace(FAM,`url(fonts/fb/${s.f}?v=${s.v}${t?'&try='+t:''}) format("woff2")`,{unicodeRange:r.join(','),display:'swap'});
     document.fonts.add(f); return faces[k]=f;
   }
   function init(j){
@@ -765,7 +779,16 @@ const Fallback=(function(){
       if(faces[k-1].status==='unloaded')load.add(faces[k-1]);
     }
     if(!load.size)return Promise.resolve(false);
-    return Promise.all([...load].map(f=>f.load().then(()=>{hook();return 1;},()=>{hook();return 0;}))).then(r=>r.some(Boolean)); // hook: each slice redraws the map as it lands or fails
+    return Promise.all([...load].map(fetchFace)).then(r=>r.some(Boolean));
+  }
+  // one slice: a slow host can drop a download, so a failed one is tried again (twice) before the characters count as having no font
+  function fetchFace(f){
+    const k=faces.indexOf(f); total++; tick();
+    return f.load().then(()=>{done++;tick();hook();return 1;},()=>{
+      done++;
+      if((tries[k]||0)<2){tries[k]=(tries[k]||0)+1;document.fonts.delete(f);faces[k]=undefined;total++;
+        setTimeout(()=>{done++;fetchFace(register(k));},1200*tries[k]);}
+      tick();hook();return 0;});
   }
   const cpsOf=str=>{const a=[];for(const ch of str){const cp=ch.codePointAt(0);if(cp>=0x250)a.push(cp);if(a.length>4000)break;}return a;};
   // no system font and no slice (or the slice failed): the caller draws the code point instead
@@ -790,7 +813,7 @@ const Fallback=(function(){
       if(!pend)pend=setTimeout(()=>{pend=null;const els=[...seen];seen.clear();for(const el of els)if(el&&el.isConnected)need(cpsOf(el.textContent||''));},120);
     }).observe(root,{childList:true,subtree:true,characterData:true});
   }
-  return {init,need,missing,waiting,nog,watch,cpsOf,set onface(f){hook=f;},get on(){return !!idx;}};
+  return {init,need,missing,waiting,nog,watch,cpsOf,set onface(f){hook=f;},set onprogress(f){prog=f;},get on(){return !!idx;}};
 })();
 // characters with nothing to draw: say what they are instead of showing a missing-glyph box
 const KIND=ch=>/^\p{Cc}$/u.test(ch)?'control character':/^\p{Cf}$/u.test(ch)?'format character':/^[\p{Zs}\p{Zl}\p{Zp}]$/u.test(ch)?'space':null;
@@ -919,9 +942,9 @@ function updateMapNav(){
   const id=$('#blocksel').value, blk=BLOCK[id], ov=id==='overview';
   $('#mapscroll').className='mapscroll '+(ov?'over':'block');
   const side=!ov&&mapView==='detailed';
-  $('#mapwrap').classList.toggle('side',side); $('#viewseg').hidden=ov; $('#lgfrag').hidden=!side; $('#maptip').hidden=side;
+  $('#mapwrap').classList.toggle('side',side); $('#viewseg').hidden=ov; $('#zoomseg').hidden=ov||side; $('#lgempty').classList.toggle('blank',!ov&&!side); $('#lgfrag').hidden=!side; $('#maptip').hidden=side;
   $('#viewseg').querySelectorAll('button').forEach(b=>b.setAttribute('aria-checked',String(b.dataset.v===mapView)));
-  $('#lgwhole').textContent=side?'whole token':'one whole token'; $('#lgsplit').textContent=side?'split into byte pieces':'split into bytes'; $('#lgempty').textContent=side?'unassigned / outside block':'no character';
+  $('#lgwhole').textContent=side?'whole token':'one whole token'; $('#lgsplit').textContent=side?'split into byte pieces':'split into bytes'; $('#lgempty').textContent=side?'unassigned / outside block':ov?'no character':'blank: no character';
   $('#scriptchips').querySelectorAll('button').forEach(b=>{const f=BLOCK[b.dataset.b];b.setAttribute('aria-pressed',String(b.dataset.b===id||(!!f&&!!blk&&f.lo===blk.lo&&f.hi===blk.hi)));});
   $('#maptip').textContent=ov?'One square is 64 characters. Click to zoom in.':'One square is one character. Click to pin it.';
 }
@@ -957,8 +980,13 @@ function drawMap(){
     const y=headH+r*(cell+GAP);
     for(let c=0;c<64;c++){
       const st=D.state[r*64+c], x=LABELW+c*(cell+GAP);
+<<<<<<< HEAD
       if(!st){ctx.strokeStyle=cLine;ctx.setLineDash([2,2]);ctx.strokeRect(x+.5,y+.5,cell-1,cell-1);ctx.setLineDash([]);continue;}
       ctx.fillStyle=st===1?cAcc:cSplit; box(ctx,x,y,cell,cell,Math.max(2,cell*.2));
+=======
+      if(!st){if(side){ctx.strokeStyle=cLine;ctx.setLineDash([2,2]);ctx.strokeRect(x+.5,y+.5,cell-1,cell-1);ctx.setLineDash([]);}continue;} // Compact: no code point here, so nothing is drawn
+      ctx.fillStyle=st===1?cAcc:cSplit; ctx.fillRect(x,y,cell,cell);
+>>>>>>> fonts-full
     }
   }
   ctx.font=`${cell-6}px ${sans}`; ctx.textAlign='center';
@@ -993,6 +1021,7 @@ if(document.fonts&&document.fonts.addEventListener)document.fonts.addEventListen
   if(!(e.fontfaces||[]).some(f=>/BPL Fallback/.test(f.family))||!mapInfo||mapInfo.overview)return;
   clearTimeout(fbDraw); fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);
 });
+Fallback.onprogress=(d,t)=>{const on=t>0&&d<t;$('#fbbar').classList.toggle('on',on);$('#fbbar').firstChild.style.width=(t?100*d/t:0)+'%';$('#fbnote').hidden=!on;if(on)$('#fbnote').textContent=`Loading fonts, ${d} of ${t}`;};
 Fallback.onface=()=>{if(!mapInfo||mapInfo.overview)return;clearTimeout(fbDraw);fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);};
 function fbView(){
   if(!Fallback.on||!mapInfo||mapInfo.overview)return;
@@ -1068,6 +1097,7 @@ $('#map').addEventListener('click',ev=>{
   if(mapInfo.overview){const g=overviewCell(ev);if(g!==null)openGroup(g);return;}
   const cp=cellAt(ev);if(cp===null||pinned===cp){unpin();return;}
   pinned=cp;drawMap();showDetail(cp);placeCard(ev);writeHash();});
+$('#zoomseg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const was=cellSize(true);mapZoom+=b.id==='zin'?3:-3;if(cellSize(true)===was){mapZoom-=b.id==='zin'?3:-3;return;}hideCard();drawMap();});
 $('#viewseg').addEventListener('click',e=>{
   const b=e.target.closest('button[data-v]');if(!b||b.dataset.v===mapView)return;
   mapView=b.dataset.v;try{localStorage.setItem('bpl-view',mapView);}catch(err){}

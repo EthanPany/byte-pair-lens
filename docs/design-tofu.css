@@ -110,3 +110,8 @@ html[data-design="tofu"] .covchartwrap{border:1.5px solid #000;border-radius:16p
 html[data-design="tofu"] .covtip{border:1.5px solid #000;border-radius:12px;box-shadow:0 4px 0 #000;padding:9px 12px}
 html[data-design="tofu"] .covtip i{border-radius:3px}
 html[data-design="tofu"] .mlegend .sw::before{border-radius:3px}
+
+/* fonts on their way: the bar above the map, and the cell size buttons */
+html[data-design="tofu"] .fbbar{height:4px;border-radius:2px}
+html[data-design="tofu"] .fbbar i{background:#000;border-radius:2px}
+html[data-design="tofu"] .zoomseg button{font-weight:600}
