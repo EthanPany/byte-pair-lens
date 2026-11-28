@@ -717,15 +717,11 @@ function fragFor(enc){
 }
 const LABELW=64, GAP=1;
 function cssVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
-<<<<<<< HEAD
 const TOFU=document.documentElement.dataset.design==='tofu'; // the second design: rounded cells, colour and motion from design-tofu.js
 function box(ctx,x,y,w,h,r){if(TOFU&&ctx.roundRect){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill();}else ctx.fillRect(x,y,w,h);}
 const fxDo=(m,a)=>{if(TOFU&&window.TofuFX)window.TofuFX[m](a);};
-function cellSize(block){const w=$('#mapscroll').clientWidth-(block?16:0);return Math.max(13,Math.min(22,Math.floor((w-LABELW-2)/64)-GAP));}
-=======
 let mapZoom=0; // Compact block view: cells this many px larger (or smaller) than the fitted size
 function cellSize(block){const w=$('#mapscroll').clientWidth-(block?16:0), fit=Math.max(13,Math.min(22,Math.floor((w-LABELW-2)/64)-GAP));return block?Math.max(9,Math.min(44,fit+mapZoom)):fit;}
->>>>>>> fonts-full
 function sizeCanvas(W,H){
   const cv=$('#map');
   const dpr=Math.min(window.devicePixelRatio||1, Math.sqrt(16e6/(W*H))); // Safari caps canvas area near 16 Mpx
@@ -980,13 +976,8 @@ function drawMap(){
     const y=headH+r*(cell+GAP);
     for(let c=0;c<64;c++){
       const st=D.state[r*64+c], x=LABELW+c*(cell+GAP);
-<<<<<<< HEAD
-      if(!st){ctx.strokeStyle=cLine;ctx.setLineDash([2,2]);ctx.strokeRect(x+.5,y+.5,cell-1,cell-1);ctx.setLineDash([]);continue;}
-      ctx.fillStyle=st===1?cAcc:cSplit; box(ctx,x,y,cell,cell,Math.max(2,cell*.2));
-=======
       if(!st){if(side){ctx.strokeStyle=cLine;ctx.setLineDash([2,2]);ctx.strokeRect(x+.5,y+.5,cell-1,cell-1);ctx.setLineDash([]);}continue;} // Compact: no code point here, so nothing is drawn
-      ctx.fillStyle=st===1?cAcc:cSplit; ctx.fillRect(x,y,cell,cell);
->>>>>>> fonts-full
+      ctx.fillStyle=st===1?cAcc:cSplit; box(ctx,x,y,cell,cell,Math.max(2,cell*.2));
     }
   }
   ctx.font=`${cell-6}px ${sans}`; ctx.textAlign='center';
