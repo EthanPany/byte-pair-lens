@@ -141,7 +141,21 @@ td.hex,td.num,.mono{font-family:var(--mono);font-size:.82rem}
 .pager button:disabled{opacity:.35;cursor:default}
 .loading{font-size:.88rem;color:var(--muted)}
 .panel{border-top:1px solid var(--fg);padding-top:14px;min-width:0}
-#bars{max-width:820px}
+#bars{max-width:none}
+.stack{display:flex;height:22px;gap:1px;background:var(--bg)}
+.stack .seg{min-width:3px;border:0;padding:0;cursor:pointer;transition:transform .12s,opacity .12s}
+.stack:hover .seg:not(:hover),.stack:has([aria-pressed="true"]) .seg:not([aria-pressed="true"]):not(:hover){opacity:.35}
+.stack .seg:hover,.stack .seg[aria-pressed="true"]{transform:scaleY(1.25)}
+.stacksay{margin:8px 0 8px;font-size:.88rem;color:var(--muted);min-height:1.4em}
+.stackkey{display:flex;flex-wrap:wrap;gap:4px 6px}
+.stackkey button{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:0 8px;font:inherit;font-size:.78rem;background:var(--bg);color:var(--fg);border:1px solid var(--line);cursor:pointer}
+.stackkey button:hover{border-color:var(--fg)}
+.stackkey button[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
+.stackkey i{width:9px;height:9px;flex:none}
+.stackkey small{color:var(--muted);font-family:var(--mono)}
+.stackkey button[aria-pressed="true"] small{color:inherit;opacity:.8}
+.vocabtbl{max-height:420px;overflow:auto}
+.vocabtbl thead th{position:sticky;top:0;background:var(--bg);z-index:2;box-shadow:0 1px 0 var(--line)}
 @media (max-width:760px){.bar{grid-template-columns:minmax(90px,120px) 1fr 96px}}
 .ws{opacity:.5}
 .num{font-weight:600;color:var(--fg)}
@@ -213,6 +227,14 @@ td.hex,td.num,.mono{font-family:var(--mono);font-size:.82rem}
 .covtip i{display:inline-block;width:9px;height:9px;margin-right:6px}
 .mlegend .sw::before{background:var(--c)}
 .covchips button.main{outline:2px solid var(--fg);outline-offset:2px}
+.covchips button.dot::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--c);box-shadow:0 0 0 1.5px var(--bg);flex:none}
+.covsets{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 8px}
+.covsets .lab{color:var(--muted);font-size:.85rem;margin-right:4px}
+.covsets button{min-height:28px;padding:0 10px;font:inherit;font-size:.82rem;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:999px;cursor:pointer}
+.covsets button:hover{border-color:var(--fg)}
+.covsets button[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
+.covsets .clear{margin-left:6px;border-style:dashed}
+.covsets .clear:disabled{opacity:.4;cursor:default;border-color:var(--line)}
 .covchartwrap canvas{display:block;width:100%;height:240px}
 .covchips{display:flex;flex-wrap:wrap;gap:6px}
 /* compare */
@@ -326,8 +348,8 @@ footer a:hover{color:var(--fg)}
         <input type="search" id="blocksearch" list="blocklist" placeholder="Find any Unicode block…" aria-label="Jump to a Unicode block">
         <datalist id="blocklist"></datalist>
       </div>
+      <div class="fbbar" id="fbbar" aria-hidden="true"><i></i></div>
       <div class="mapwrap" id="mapwrap">
-        <div class="fbbar" id="fbbar" aria-hidden="true"><i></i></div>
         <div class="mapscroll over" id="mapscroll"><canvas id="map"></canvas></div>
         <div class="detail" id="detail" hidden></div>
       </div>
@@ -354,7 +376,7 @@ footer a:hover{color:var(--fg)}
 
   <section class="panel">
     <h2>Vocabulary by script <small id="vsize"></small></h2>
-    <div class="bars" id="bars" title="Bar length is on a square-root scale. Click a row to browse it below."></div>
+    <div class="bars" id="bars"></div>
   </section>
 
   <section>
@@ -364,7 +386,7 @@ footer a:hover{color:var(--fg)}
       <select id="catsel" aria-label="Category"><option value="-1">all categories</option></select>
       <select id="sort" aria-label="Sort"><option value="rank">by merge rank</option><option value="len">longest first</option></select>
     </div>
-    <div class="tbl"><table><thead><tr><th>rank</th><th>token</th><th>bytes</th><th>length</th><th>category</th></tr></thead><tbody id="rows" title="Click a token to see how BPE built it"></tbody></table></div>
+    <div class="tbl vocabtbl"><table><thead><tr><th>rank</th><th>token</th><th>bytes</th><th>length</th><th>category</th></tr></thead><tbody id="rows" title="Click a token to see how BPE built it"></tbody></table></div>
     <div class="pager"><button id="prev">‹ Prev</button><span id="pginfo"></span><button id="next">Next ›</button></div>
     <div id="tree" class="tree" hidden></div>
   </section>
@@ -383,12 +405,13 @@ footer a:hover{color:var(--fg)}
     <section>
       <h2 id="covtitle"></h2>
       <select id="covscript" hidden aria-hidden="true" tabindex="-1"></select>
+      <div class="covsets" id="covsets" role="group" aria-label="Groups to compare"></div>
       <div class="scriptchips covchips" id="covchips" role="group" aria-label="Script"></div>
       <p id="covsummary" class="covsum"></p>
       <div class="covchartwrap"><canvas id="covchart" aria-label="Cumulative share of text against frequency rank"></canvas><div id="covtip" class="covtip" hidden></div></div>
       <div class="mlegend" id="covlegend"></div>
-      <h2 style="margin-top:28px" id="covsplittitle">Most frequent characters that get split</h2>
-      <div class="tbl"><table id="covsplit"></table></div>
+      <div id="covbody"><h2 style="margin-top:28px" id="covsplittitle">Most frequent characters that get split</h2>
+      <div class="tbl"><table id="covsplit"></table></div></div>
     </section>
   </div>
 
@@ -420,7 +443,7 @@ footer a:hover{color:var(--fg)}
 (function(){
 const $=s=>document.querySelector(s);
 const TOKCOL=['t1','t2','t3','t4','t5'];
-const cache={}; let V=null, curEnc='cl100k_base', booted=false, tokDirty=true;
+const cache={}; let V=null, curEnc='o200k_base', booted=false, tokDirty=true;
 const encU=new TextEncoder();
 
 const hex=BPE.hex;
@@ -666,14 +689,24 @@ function fillStrip(strip,Vx,ids,compact){
   strip.append(frag);
 }
 
+// Vocabulary by script: one stacked bar (segment width on a square-root scale, so the small scripts stay visible)
+// and the list of scripts as chips under it. Hover names a segment, a click filters the table below.
+const catColour=i=>`hsl(${(i*47)%360} 62% ${42+(i%3)*9}%)`;
 function renderBars(){
   const counts=new Array(V.cats.length).fill(0); V.cat.forEach(c=>counts[c]++);
-  const order=counts.map((n,i)=>i).sort((a,b)=>counts[b]-counts[a]);
-  const max=counts[order[0]], total=V.cat.length;
+  const order=counts.map((n,i)=>i).filter(i=>counts[i]).sort((a,b)=>counts[b]-counts[a]);
+  const total=V.cat.length, w=order.map(i=>Math.sqrt(counts[i])), sum=w.reduce((x,y)=>x+y,0);
+  const say=i=>`${V.cats[i]} · ${counts[i].toLocaleString()} tokens · ${(100*counts[i]/total).toFixed(1)}%`;
   $('#vsize').textContent=total.toLocaleString()+' tokens';
-  $('#bars').innerHTML=order.map(i=>`<button class="bar" data-cat="${i}" aria-pressed="false"><span class="lab">${V.cats[i]}</span><span class="rail"><span class="fill" style="width:${(100*Math.sqrt(counts[i]/max)).toFixed(1)}%"></span></span><span class="n">${counts[i].toLocaleString()} · ${(100*counts[i]/total).toFixed(1)}%</span></button>`).join('');
-  $('#bars').querySelectorAll('.bar').forEach(b=>b.onclick=()=>{$('#catsel').value=b.dataset.cat;page=0;renderTable();});
+  $('#bars').innerHTML=`<div class="stack" role="group" aria-label="Vocabulary by script">${order.map((i,k)=>`<button class="seg" data-cat="${i}" style="flex:${(w[k]/sum*1000).toFixed(1)} 0 3px;background:${catColour(i)}" title="${esc(say(i))}" aria-label="${esc(say(i))}" aria-pressed="false"></button>`).join('')}</div><p class="stacksay" id="stacksay"></p><div class="stackkey">${order.map(i=>`<button data-cat="${i}" aria-pressed="false"><i style="background:${catColour(i)}"></i>${esc(V.cats[i])} <small>${(100*counts[i]/total).toFixed(1)}%</small></button>`).join('')}</div>`;
+  const idle=()=>{const c=+$('#catsel').value;$('#stacksay').textContent=c>=0?say(c):'Hover a segment for its script. Click to filter the table.';};
+  const mark=()=>{const c=$('#catsel').value;$('#bars').querySelectorAll('button[data-cat]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.cat===c)));idle();};
+  $('#bars').querySelectorAll('button[data-cat]').forEach(b=>{
+    b.onclick=()=>{$('#catsel').value=$('#catsel').value===b.dataset.cat?'-1':b.dataset.cat;page=0;renderTable();mark();};
+    b.onmouseenter=b.onfocus=()=>{$('#stacksay').textContent=say(+b.dataset.cat);}; b.onmouseleave=b.onblur=idle;});
+  $('#catsel').onchange=mark;
   const sel=$('#catsel'); sel.innerHTML='<option value="-1">all categories</option>'+order.map(i=>`<option value="${i}">${V.cats[i]}</option>`).join('');
+  mark();
 }
 
 let page=0; const PAGE=50;
@@ -879,6 +912,19 @@ function drawOverview(){
   });
   // name the scripts on the map itself: an outline per featured script, a label where it fits
   const taken=[]; // label spans already used in the band above the first row
+  // every Unicode block gets a faint outline, so the map reads as blocks and not as one grey field
+  ctx.strokeStyle=cMuted; ctx.globalAlpha=.55; ctx.lineWidth=1; ctx.beginPath();
+  for(const b of ByteMap.ALL){
+    const g0=b.lo>>6, g1=b.hi>>6; if(g1-g0<1)continue; // under two cells: nothing to outline
+    const inB=g=>g>=g0&&g<=g1;
+    for(let g=g0;g<=g1;g++){const q=pos.get(g); if(!q)continue; const [x,y,,col]=q, x0=x-.5,y0=y-.5,x1=x+cell+.5,y1=y+cell+.5;
+      if(col===0||!inB(g-1)||!pos.get(g-1)){ctx.moveTo(x0,y0);ctx.lineTo(x0,y1);}
+      if(col===63||!inB(g+1)||!pos.get(g+1)){ctx.moveTo(x1,y0);ctx.lineTo(x1,y1);}
+      if(!inB(g-64)||!pos.get(g-64)){ctx.moveTo(x0,y0);ctx.lineTo(x1,y0);}
+      if(!inB(g+64)||!pos.get(g+64)){ctx.moveTo(x0,y1);ctx.lineTo(x1,y1);}
+    }
+  }
+  ctx.stroke(); ctx.globalAlpha=1;
   for(const b of [...ByteMap.FEATURED,...MORE.map(([id])=>ByteMap.BLOCK[id])].sort((p,q)=>(q.hi-q.lo)-(p.hi-p.lo))){
     const cells=[]; for(let g=b.lo>>6;g<=b.hi>>6;g++){const p=pos.get(g);if(p)cells.push(p);}
     if(!cells.length)continue;
@@ -944,7 +990,7 @@ function setBlock(id){
   drawMap(); writeHash();
 }
 // more scripts for the byte map's selector and overview (not in ByteMap.FEATURED: the Coverage tab and the paper's table keep their 15)
-const MORE=[['u530','Armenian'],['u10A0','Georgian'],['uD80','Sinhala'],['uF00','Tibetan'],['u1000','Myanmar'],['u1200','Ethiopic'],['u13A0','Cherokee'],['u1400','Canadian Syllabics'],['u1780','Khmer'],['u1800','Mongolian'],['uA000','Yi'],['u10000','Linear B'],['u10900','Phoenician'],['u11000','Brahmi'],['u12000','Cuneiform'],['u13000','Egyptian'],['u17000','Tangut'],['u1B170','Nushu'],['u1D400','Math']].filter(([id])=>ByteMap.BLOCK[id]);
+const MORE=[['u530','Armenian'],['u10A0','Georgian'],['uD80','Sinhala'],['uF00','Tibetan'],['u1000','Myanmar'],['u1200','Ethiopic'],['u13A0','Cherokee'],['u1400','Canadian Syllabics'],['u1780','Khmer'],['u16A0','Runic'],['u1800','Mongolian'],['u2800','Braille'],['uA000','Yi'],['u10000','Linear B'],['u10900','Phoenician'],['u11000','Brahmi'],['u12000','Cuneiform'],['u13000','Egyptian'],['u13460','Egyptian Ext A'],['u17000','Tangut'],['u1B170','Nushu'],['u1D400','Math']].filter(([id])=>ByteMap.BLOCK[id]);
 const SHORTB={...Object.fromEntries(MORE),ascii:'ASCII',latin:'Latin',greek:'Greek',cyrillic:'Cyrillic',hebrew:'Hebrew',arabic:'Arabic',devanagari:'Devanagari',bengali:'Bengali',thai:'Thai',kana:'Kana',hangul:'Hangul',han:'Han',hanA:'Han Ext A',emoji:'Emoji',hanB:'Han Ext B'};
 (function buildMapNav(){
   $('#scriptchips').innerHTML='<button data-b="overview">All of Unicode</button>'+ByteMap.FEATURED.map(b=>`<button data-b="${b.id}" title="${b.name}: ${b.langs}">${SHORTB[b.id]||b.name}</button>`).join('')+'<span class="gsep" aria-hidden="true"></span>'+MORE.map(([id,n])=>`<button data-b="${id}" class="more" title="${ByteMap.BLOCK[id].name}">${n}</button>`).join('');
@@ -958,7 +1004,7 @@ function updateMapNav(){
   const id=$('#blocksel').value, blk=BLOCK[id], ov=id==='overview';
   $('#mapscroll').className='mapscroll '+(ov?'over':'block');
   const side=!ov&&mapView==='detailed';
-  $('#mapwrap').classList.toggle('side',side); $('#viewseg').hidden=ov; $('#zoomseg').hidden=ov||side; $('#lgempty').classList.toggle('blank',!ov&&!side); $('#lgfrag').hidden=!side; $('#maptip').hidden=side;
+  $('#mapwrap').classList.toggle('side',side); $('#viewseg').hidden=ov; $('#zoomseg').hidden=ov||side; $('#lgempty').classList.toggle('blank',!ov&&!side); $('#lgfrag').hidden=ov; $('#maptip').hidden=side;
   $('#viewseg').querySelectorAll('button').forEach(b=>b.setAttribute('aria-checked',String(b.dataset.v===mapView)));
   $('#lgwhole').textContent=side?'whole token':'one whole token'; $('#lgsplit').textContent=side?'split into byte pieces':'split into bytes'; $('#lgempty').textContent=side?'unassigned / outside block':ov?'no character':'blank: no character';
   $('#scriptchips').querySelectorAll('button').forEach(b=>{const f=BLOCK[b.dataset.b];b.setAttribute('aria-pressed',String(b.dataset.b===id||(!!f&&!!blk&&f.lo===blk.lo&&f.hi===blk.hi)));});
@@ -974,12 +1020,14 @@ document.addEventListener('keydown',e=>{
   if(pinned!==null)unpin(); else if($('#blocksel').value!=='overview')setBlock('overview');
 });
 
+let mapPaintSeq=0;
 function drawMap(){
+  ++mapPaintSeq; // stop a block still being painted in pieces
   if($('#pane-map').hidden||!bitsFor(curEnc))return;
   updateMapNav();
   if($('#blocksel').value==='overview'){drawOverview();return;}
   const blk=BLOCK[$('#blocksel').value]; const D=blockLite(curEnc,blk);
-  const side=mapView==='detailed', F=side?fragFor(curEnc):null;
+  const side=mapView==='detailed', F=fragFor(curEnc);
   const cell=side?22:cellSize(true), headH=18;
   const W=LABELW+64*(cell+GAP)+1, H=headH+D.rows*(cell+GAP)+1, ctx=sizeCanvas(W,H);
   const cFg=cssVar('--fg'), cLine=cssVar('--line'), cMuted=cssVar('--muted'), cBg=cssVar('--bg'), cAcc=cssVar('--whole'), cSplit=cssVar('--split'), cFrag=cssVar('--frag'), mono=cssVar('--mono'), sans=cssVar('--sans');
@@ -987,39 +1035,48 @@ function drawMap(){
   const multi=blk.lo>=0x80;
   ctx.font=`9px ${mono}`; ctx.fillStyle=cMuted;
   for(let c=0;c<64;c+=cell>=16?1:4)ctx.fillText((multi?0x80+c:c).toString(16).toUpperCase().padStart(2,'0'),LABELW+c*(cell+GAP)+2,headH/2);
-  for(let r=0;r<D.rows;r++){
-    const y=headH+r*(cell+GAP), fr=F&&F[D.r0+r];
-    ctx.fillStyle=fr?cFrag:cMuted; ctx.fillText(multi?hex(rowPrefix((D.r0+r)<<6)):U((D.r0+r)<<6),0,y+cell/2+1);
-    if(fr)ctx.fillRect(LABELW-6,y,3,cell);
-  }
-  for(let r=0;r<D.rows;r++){
-    const y=headH+r*(cell+GAP);
-    for(let c=0;c<64;c++){
-      const st=D.state[r*64+c], x=LABELW+c*(cell+GAP);
-      if(!st){if(side){ctx.strokeStyle=cLine;ctx.setLineDash([2,2]);ctx.strokeRect(x+.5,y+.5,cell-1,cell-1);ctx.setLineDash([]);}continue;} // Compact: no code point here, so nothing is drawn
-      ctx.fillStyle=st===1?cAcc:cSplit; ctx.fillRect(x,y,cell,cell);
+  // rows a..b-1: label, cells, characters. A large block (Han: 328 rows) is painted in pieces, the rows on screen first,
+  // so switching view or cell size answers at once.
+  const paint=(a,b)=>{
+    ctx.textAlign='left'; ctx.font=`9px ${mono}`;
+    for(let r=a;r<b;r++){
+      const y=headH+r*(cell+GAP), fr=F&&F[D.r0+r];
+      ctx.fillStyle=fr?cFrag:cMuted; ctx.fillText(multi?hex(rowPrefix((D.r0+r)<<6)):U((D.r0+r)<<6),0,y+cell/2+1);
+      if(fr)ctx.fillRect(LABELW-6,y,3,cell);
+      for(let c=0;c<64;c++){
+        const st=D.state[r*64+c], x=LABELW+c*(cell+GAP);
+        if(!st){if(side){ctx.strokeStyle=cLine;ctx.setLineDash([2,2]);ctx.strokeRect(x+.5,y+.5,cell-1,cell-1);ctx.setLineDash([]);}continue;} // Compact: no code point here, so nothing is drawn
+        ctx.fillStyle=st===1?cAcc:cSplit; ctx.fillRect(x,y,cell,cell);
+      }
     }
-  }
-  ctx.font=`${cell-6}px ${sans}`; ctx.textAlign='center';
-  for(let r=0;r<D.rows;r++){
-    const y=headH+r*(cell+GAP);
-    for(let c=0;c<64;c++){
-      const st=D.state[r*64+c]; if(!st)continue;
-      const cp=((D.r0+r)<<6)|c, ch=String.fromCodePoint(cp); if(KIND(ch))continue;
-      ctx.fillStyle=st===1?cBg:cFg;
-      if(Fallback.missing(cp)){ // no font anywhere: its code point in small type (a dot in cells under 12 px), never a box
-        const cx=LABELW+c*(cell+GAP)+cell/2; ctx.globalAlpha=.6;
-        if(cell>=12){const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2),fs=Math.max(4.4,cell*.34);ctx.font=`${fs}px ${mono}`;ctx.fillText(h.slice(0,m),cx,y+cell/2-fs*.5+.5,cell-2);ctx.fillText(h.slice(m),cx,y+cell/2+fs*.5+.5,cell-2);ctx.font=`${cell-6}px ${sans}`;}
-        else{const q=Math.max(2,Math.round(cell/7));ctx.fillRect(cx-q/2,y+cell/2-q/2,q,q);}
-        ctx.globalAlpha=1;continue;}
-      if(Fallback.waiting(cp))continue;
-      ctx.fillText(MARK.test(ch)?'◌'+ch:ch,LABELW+c*(cell+GAP)+cell/2,y+cell/2+1,cell);
+    ctx.font=`${cell-6}px ${sans}`; ctx.textAlign='center';
+    for(let r=a;r<b;r++){
+      const y=headH+r*(cell+GAP);
+      for(let c=0;c<64;c++){
+        const st=D.state[r*64+c]; if(!st)continue;
+        const cp=((D.r0+r)<<6)|c, ch=String.fromCodePoint(cp); if(KIND(ch))continue;
+        ctx.fillStyle=st===1?cBg:cFg;
+        if(Fallback.missing(cp)){ // no font anywhere: its code point in small type (a dot in cells under 12 px), never a box
+          const cx=LABELW+c*(cell+GAP)+cell/2; ctx.globalAlpha=.6;
+          if(cell>=12){const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2),fs=Math.max(4.4,cell*.34);ctx.font=`${fs}px ${mono}`;ctx.fillText(h.slice(0,m),cx,y+cell/2-fs*.5+.5,cell-2);ctx.fillText(h.slice(m),cx,y+cell/2+fs*.5+.5,cell-2);ctx.font=`${cell-6}px ${sans}`;}
+          else{const q=Math.max(2,Math.round(cell/7));ctx.fillRect(cx-q/2,y+cell/2-q/2,q,q);}
+          ctx.globalAlpha=1;continue;}
+        if(Fallback.waiting(cp))continue;
+        ctx.fillText(MARK.test(ch)?'◌'+ch:ch,LABELW+c*(cell+GAP)+cell/2,y+cell/2+1,cell);
+      }
     }
-  }
-  ctx.textAlign='left';
-  if(pinned!==null&&pinned>=blk.lo&&pinned<=blk.hi){ // outline the pinned character
-    const r=(pinned>>6)-D.r0, c=pinned&63; ctx.strokeStyle=cFrag; ctx.lineWidth=2; ctx.strokeRect(LABELW+c*(cell+GAP)-1,headH+r*(cell+GAP)-1,cell+2,cell+2); ctx.lineWidth=1;
-  }
+    ctx.textAlign='left';
+    if(pinned!==null&&pinned>=blk.lo&&pinned<=blk.hi){ // outline the pinned character
+      const r=(pinned>>6)-D.r0, c=pinned&63;
+      if(r>=a&&r<b){ctx.strokeStyle=cFrag; ctx.lineWidth=2; ctx.strokeRect(LABELW+c*(cell+GAP)-1,headH+r*(cell+GAP)-1,cell+2,cell+2); ctx.lineWidth=1;}
+    }
+  };
+  const seq=++mapPaintSeq, cvr=$('#map').getBoundingClientRect(), boxr=$('#mapscroll').getBoundingClientRect();
+  const vTop=Math.max(0,boxr.top)-cvr.top, vBot=Math.min(innerHeight,boxr.bottom)-cvr.top;
+  const v0=Math.max(0,Math.min(D.rows,Math.floor((vTop-headH)/(cell+GAP))-2)), v1=Math.max(v0,Math.min(D.rows,Math.ceil((vBot-headH)/(cell+GAP))+2));
+  paint(v0,v1);
+  const rest=[]; for(let r=v1;r<D.rows;r+=24)rest.push([r,Math.min(D.rows,r+24)]); for(let r=v0;r>0;r-=24)rest.push([Math.max(0,r-24),r]);
+  (function more(){if(seq!==mapPaintSeq||!rest.length)return;const [x,y]=rest.shift();paint(x,y);setTimeout(more,0);})();
   $('#mapstats').innerHTML=`<span class="big">${pct(D.whole,D.assigned)}</span><span class="say">of <b>${blk.name}</b> is one whole token in <b>${esc(encName())}</b></span><span class="more">${D.whole.toLocaleString()} of ${D.assigned.toLocaleString()} characters · ${U(blk.lo)}–${blk.hi.toString(16).toUpperCase()}</span>`;
   mapInfo={blk,D,cell,headH,F};
   fbView();
@@ -1195,10 +1252,20 @@ function covTip(ev){
 }
 function renderCovDetail(){
   if(!V)return;
+  if(covScript&&!covSel.includes(covScript))covSel=[covScript];
+  if(!covSel.length)covScript=null;
+  const multi=covSel.length>1;
+  $('#covchips').querySelectorAll('button').forEach(b=>{const on=covSel.includes(b.dataset.b);b.setAttribute('aria-pressed',String(on));b.classList.toggle('main',on&&multi&&b.dataset.b===covScript);b.classList.toggle('dot',on&&multi);if(on)b.style.setProperty('--c',covColour(b.dataset.b));});
+  const key=[...covSel].sort().join();
+  $('#covsets').querySelectorAll('button[data-set]').forEach(b=>b.setAttribute('aria-pressed',String(COVSETS[b.dataset.set][1].slice().sort().join()===key)));
+  $('#covclear').disabled=!covSel.length;
+  $('#covbody').hidden=!covSel.length;
+  if(!covSel.length){ // nothing picked: an empty chart to start a comparison from
+    $('#covtitle').textContent='Most frequent first'; $('#covsummary').textContent='Pick a script, or a group to compare.';
+    covHover=null; $('#covtip').hidden=true; drawCovChart(); return;
+  }
   const blk=ByteMap.BLOCK[covScript], F=FREQ.scripts[covScript];
   $('#covscript').value=covScript;
-  if(!covSel.includes(covScript))covSel=[covScript];
-  $('#covchips').querySelectorAll('button').forEach(b=>{const on=covSel.includes(b.dataset.b);b.setAttribute('aria-pressed',String(on));b.classList.toggle('main',on&&covSel.length>1&&b.dataset.b===covScript);});
   $('#covtitle').textContent=covSel.length>1?`${covSel.length} scripts, most frequent first`:`${blk.name}, most frequent first`;
   const name=encName();
   if(!F){$('#covsummary').textContent=`No frequency data for ${blk.name}.`;covHover=null;drawCovChart();$('#covsplit').innerHTML='';return;}
@@ -1223,11 +1290,19 @@ $('#covtable').addEventListener('click',e=>{
   if(td.dataset.enc!==curEnc)switchEnc(td.dataset.enc); else{renderCovTable();renderCovDetail();writeHash();}
   $('#covtitle').scrollIntoView({behavior:'smooth',block:'start'});
 });
-// a click adds a script to the chart or takes it off; the last one added is the one described below the chips
+// Scripts on the chart. A chip adds its script or takes it off (none left is fine: an empty chart to start from);
+// a group puts a ready comparison up in one click; the last script added is the one described under the chart.
+const COVSETS={cjk:['East Asian',['han','kana','hangul']],eu:['European',['latin','greek','cyrillic']],me:['Middle Eastern',['hebrew','arabic']],sa:['South and Southeast Asian',['devanagari','bengali','thai']],all:['All',ByteMap.FEATURED.map(b=>b.id)]};
+$('#covsets').innerHTML='<span class="lab">Compare</span>'+Object.entries(COVSETS).map(([k,[n]])=>`<button data-set="${k}" aria-pressed="false">${n}</button>`).join('')+'<button id="covclear" class="clear" title="Take every script off the chart">Clear</button>';
+const covApply=()=>{renderCovTable();renderCovDetail();writeHash();};
+$('#covsets').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+  if(b.id==='covclear'){covSel=[];covScript=null;}
+  else{covSel=COVSETS[b.dataset.set][1].filter(id=>FREQ.scripts[id]);covScript=covSel[0]||null;}
+  covApply();});
 $('#covchips').addEventListener('click',e=>{const b=e.target.closest('button[data-b]');if(!b)return;const id=b.dataset.b;
-  if(covSel.includes(id)){if(covSel.length>1){covSel=covSel.filter(x=>x!==id);if(covScript===id)covScript=covSel[covSel.length-1];}}
+  if(covSel.includes(id)){covSel=covSel.filter(x=>x!==id);if(covScript===id)covScript=covSel[covSel.length-1]||null;}
   else{covSel.push(id);covScript=id;}
-  renderCovTable();renderCovDetail();writeHash();});
+  covApply();});
 $('#covchart').addEventListener('mousemove',covTip);$('#covchart').addEventListener('mouseleave',()=>covTip(null));
 $('#covcsv').addEventListener('click',async()=>{const a=document.createElement('a');a.href=await dataURL('coverage.csv');a.download='tofu-coverage.csv';document.body.append(a);a.click();a.remove();});
 window.addEventListener('resize',()=>{if(V&&!$('#pane-cov').hidden&&COV&&FREQ)drawCovChart();});
@@ -1354,11 +1429,11 @@ function showTab(id,noHash){
   if(!noHash)writeHash();
 }
 for(const t of TABS)$('#tab-'+t).onclick=()=>showTab(t);
-{const h=readHash(); if(h.view==='detailed'||h.view==='compact')mapView=h.view; if(h.block&&(BLOCK[h.block]||h.block==='overview'))$('#blocksel').value=h.block; if(h.cp&&/^[0-9A-F]+$/i.test(h.cp))pinned=parseInt(h.cp,16); if(h.script){const ok=h.script.split(',').filter(x=>BLOCK[x]);if(ok.length){covSel=ok;covScript=ok[ok.length-1];}} if(h.cmp){const ok=h.cmp.split(',').filter(e=>[...$('#encsel').options].some(o=>o.value===e)).slice(0,4);if(ok.length)cmpSel=ok;} if(TABS.includes(h.tab))showTab(h.tab,true);}
+{const h=readHash(); if(h.view==='detailed'||h.view==='compact')mapView=h.view; if(h.block&&(BLOCK[h.block]||h.block==='overview'))$('#blocksel').value=h.block; if(h.cp&&/^[0-9A-F]+$/i.test(h.cp))pinned=parseInt(h.cp,16); if(h.script==='none'){covSel=[];covScript=null;}else if(h.script){const ok=h.script.split(',').filter(x=>BLOCK[x]);if(ok.length){covSel=ok;covScript=ok[ok.length-1];}} if(h.cmp){const ok=h.cmp.split(',').filter(e=>[...$('#encsel').options].some(o=>o.value===e)).slice(0,4);if(ok.length)cmpSel=ok;} if(TABS.includes(h.tab))showTab(h.tab,true);}
 
 // URL state: #enc=qwen3&tab=map (a bare #map still opens the map)
 function readHash(){const h={};for(const kv of location.hash.slice(1).split('&')){if(!kv)continue;const [k,v]=kv.split('=');h[k]=v===undefined?'':decodeURIComponent(v);}if('map' in h)h.tab='map';return h;}
-function writeHash(){const tab=currentTab();let h='#enc='+curEnc;if(tab==='tok')h+='&tab=tok';if(tab==='map'){h+='&tab=map&block='+$('#blocksel').value;if(mapView==='detailed')h+='&view=detailed';if(pinned!==null)h+='&cp='+pinned.toString(16).toUpperCase();}if(tab==='cov')h+='&tab=cov&script='+covSel.filter(x=>x!==covScript).concat(covScript).join(',');if(tab==='cmp')h+='&tab=cmp&cmp='+cmpSel.join(',');history.replaceState(null,'','#'+h.slice(1));}
+function writeHash(){const tab=currentTab();let h='#enc='+curEnc;if(tab==='tok')h+='&tab=tok';if(tab==='map'){h+='&tab=map&block='+$('#blocksel').value;if(mapView==='detailed')h+='&view=detailed';if(pinned!==null)h+='&cp='+pinned.toString(16).toUpperCase();}if(tab==='cov')h+='&tab=cov&script='+(covSel.length?covSel.filter(x=>x!==covScript).concat(covScript).join(','):'none');if(tab==='cmp')h+='&tab=cmp&cmp='+cmpSel.join(',');history.replaceState(null,'','#'+h.slice(1));}
 /* Switching tokenizer: the map redraws at once from the bitmap; the vocabulary follows from the worker
    and fills in everything that needs it. The veil only comes up when the visible tab can't show
    anything without the vocabulary. */
@@ -1395,7 +1470,7 @@ $('#sort').addEventListener('change',()=>{page=0;renderTable();});
 $('#prev').onclick=()=>{page--;renderTable();};
 $('#next').onclick=()=>{page++;renderTable();};
 renderPickers();
-const H=readHash(); const startEnc=[...$('#encsel').options].some(o=>o.value===H.enc)?H.enc:'cl100k_base';
+const H=readHash(); const startEnc=[...$('#encsel').options].some(o=>o.value===H.enc)?H.enc:'o200k_base';
 // First paint: the bitmaps (one small file) and the fonts. The vocabulary loads behind the drawn map.
 (function boot(){
   Loader.hold();
