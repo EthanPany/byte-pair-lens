@@ -178,12 +178,13 @@ td.hex,td.num,.mono{font-family:var(--mono);font-size:.82rem}
 .viewseg{margin:0 0 0 auto;gap:0}
 .zoomseg:not([hidden])+.viewseg{margin-left:0}
 .zoomseg button{min-width:var(--h);justify-content:center;font-size:1.05rem}
-.mlegend .fbnote{display:inline-flex;align-items:center;gap:8px;padding:3px 11px 3px 9px;background:var(--fg);color:var(--bg);font-weight:600;font-size:.82rem}
-.mlegend .fbnote[hidden]{display:none}
-.mlegend .fbnote::before{width:8px;height:8px;margin:0;border-radius:50%;background:var(--bg);animation:fbpulse 1s ease-in-out infinite}
+.fbtoast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:25;display:flex;align-items:center;gap:10px;min-width:230px;padding:9px 14px;background:var(--fg);color:var(--bg);font-weight:600;font-size:.88rem;box-shadow:0 6px 24px rgba(17,17,17,.25);pointer-events:none}
+.fbtoast[hidden]{display:none}
+.fbtoast::before{content:"";width:9px;height:9px;flex:none;border-radius:50%;background:var(--bg);animation:fbpulse 1s ease-in-out infinite}
+.fbtoast .bar{flex:1;min-width:70px;height:5px;background:rgba(255,255,255,.28);overflow:hidden}
+.fbtoast .bar i{display:block;height:100%;width:0;background:var(--bg);transition:width .25s}
 @keyframes fbpulse{50%{opacity:.25;transform:scale(.7)}}
-@media (prefers-reduced-motion:reduce){.mlegend .fbnote::before{animation:none}}
-.fbbar{height:4px;margin-bottom:2px;background:transparent;overflow:hidden}.fbbar.on{background:var(--line)}.fbbar i{display:block;height:100%;width:0;background:var(--whole);transition:width .25s}.fbbar:not(.on) i{opacity:0}
+@media (prefers-reduced-motion:reduce){.fbtoast::before{animation:none}}
 .viewseg button+button{margin-left:-1px}
 .viewseg:not([hidden])+input{margin-left:0}
 /* Detailed view: the block map as in the paper's figure, with the detail in a panel beside it */
@@ -323,7 +324,8 @@ if(new URLSearchParams(location.search).get('design')==='tofu'){document.documen
     </optgroup>
   </select>
   <input type="file" id="ownfile" accept=".json,application/json" hidden>
-  <div class="dock" id="dock" data-state="hidden" aria-label="Tokenizer (floating)">
+  <div class="fbtoast" id="fbtoast" role="status" hidden><span id="fbnote"></span><span class="bar"><i id="fbfill"></i></span></div>
+<div class="dock" id="dock" data-state="hidden" aria-label="Tokenizer (floating)">
     <div class="dockrail" id="dockrail" role="radiogroup" aria-label="Tokenizer"></div>
     <button class="dockbtn" id="dockhide" aria-label="Hide tokenizer bar" title="Hide">▾</button>
     <button class="dockpill" id="dockpill" aria-label="Show tokenizer bar" title="Show tokenizers"></button>
@@ -344,13 +346,11 @@ if(new URLSearchParams(location.search).get('design')==='tofu'){document.documen
         <div class="scriptchips" id="scriptchips" role="group" aria-label="Scripts"></div>
       </div>
       <div class="mlegend maplegend"><span class="whole" id="lgwhole">one whole token</span><span class="none" id="lgsplit">split into bytes</span><span class="fragrow" id="lgfrag" hidden>row prefix is a fragment token</span><span class="empty" id="lgempty" title="Unassigned, or outside this block">no character</span><span class="tip" id="maptip"></span>
-        <span class="fbnote" id="fbnote" role="status" hidden></span>
         <div class="pills viewseg zoomseg" id="zoomseg" role="group" aria-label="Cell size" hidden><button id="zout" title="Smaller cells" aria-label="Smaller cells">−</button><button id="zin" title="Larger cells" aria-label="Larger cells">+</button></div>
         <div class="pills viewseg" id="viewseg" role="radiogroup" aria-label="View" hidden><button role="radio" data-v="compact" aria-checked="true" title="The 64 columns fitted to the page">Compact</button><button role="radio" data-v="detailed" aria-checked="false" title="Larger characters, a side panel, and a red mark on rows whose byte prefix is itself a token">Detailed</button></div>
         <input type="search" id="blocksearch" list="blocklist" placeholder="Find any Unicode block…" aria-label="Jump to a Unicode block">
         <datalist id="blocklist"></datalist>
       </div>
-      <div class="fbbar" id="fbbar" aria-hidden="true"><i></i></div>
       <div class="mapwrap" id="mapwrap">
         <div class="mapscroll over" id="mapscroll"><canvas id="map"></canvas></div>
         <div class="detail" id="detail" hidden></div>
@@ -1108,7 +1108,7 @@ if(document.fonts&&document.fonts.addEventListener)document.fonts.addEventListen
   if(!(e.fontfaces||[]).some(f=>/BPL Fallback/.test(f.family))||!mapInfo||mapInfo.overview)return;
   clearTimeout(fbDraw); fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);
 });
-function fbProgress(d,t){const on=t>0&&d<t;$('#fbbar').classList.toggle('on',on);$('#fbbar').firstChild.style.width=(t?100*d/t:0)+'%';$('#fbnote').hidden=!on;if(on)$('#fbnote').textContent=`Loading fonts ${d}/${t}`;}
+function fbProgress(d,t){const on=t>0&&d<t;$('#fbtoast').hidden=!on;if(on){$('#fbnote').textContent=`Loading fonts ${d}/${t}`;$('#fbfill').style.width=(100*d/t)+'%';}} // a small toast above the tokenizer bar, on every tab; it covers nothing that is in use
 Fallback.onprogress=fbProgress;
 Fallback.onface=()=>{if(!mapInfo||mapInfo.overview)return;clearTimeout(fbDraw);fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);};
 function fbView(){
