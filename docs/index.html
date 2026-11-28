@@ -716,6 +716,7 @@ const Fallback=(function(){
   const FAM='BPL Fallback';
   let idx=null, table=null, mode='probe', base='', tofu=null;
   const faces=[], glyph=new Map();
+  let hook=()=>{};
   const pc=document.createElement('canvas'); pc.width=pc.height=24;
   const px=pc.getContext('2d',{willReadFrequently:true});
   function sig(ch){ // what the system fonts draw for ch, as a hash of the pixels
@@ -752,7 +753,7 @@ const Fallback=(function(){
       if(faces[k-1].status==='unloaded')load.add(faces[k-1]);
     }
     if(!load.size)return Promise.resolve(false);
-    return Promise.all([...load].map(f=>f.load().then(()=>1,()=>0))).then(r=>r.some(Boolean));
+    return Promise.all([...load].map(f=>f.load().then(()=>{hook();return 1;},()=>{hook();return 0;}))).then(r=>r.some(Boolean)); // hook: each slice redraws the map as it lands or fails
   }
   const cpsOf=str=>{const a=[];for(const ch of str){const cp=ch.codePointAt(0);if(cp>=0x250)a.push(cp);if(a.length>4000)break;}return a;};
   // no system font and no slice (or the slice failed): the caller draws the code point instead
@@ -777,7 +778,7 @@ const Fallback=(function(){
       if(!pend)pend=setTimeout(()=>{pend=null;const els=[...seen];seen.clear();for(const el of els)if(el&&el.isConnected)need(cpsOf(el.textContent||''));},120);
     }).observe(root,{childList:true,subtree:true,characterData:true});
   }
-  return {init,need,missing,waiting,nog,watch,cpsOf,get on(){return !!idx;}};
+  return {init,need,missing,waiting,nog,watch,cpsOf,set onface(f){hook=f;},get on(){return !!idx;}};
 })();
 // characters with nothing to draw: say what they are instead of showing a missing-glyph box
 const KIND=ch=>/^\p{Cc}$/u.test(ch)?'control character':/^\p{Cf}$/u.test(ch)?'format character':/^[\p{Zs}\p{Zl}\p{Zp}]$/u.test(ch)?'space':null;
@@ -972,6 +973,7 @@ if(document.fonts&&document.fonts.addEventListener)document.fonts.addEventListen
   if(!(e.fontfaces||[]).some(f=>/BPL Fallback/.test(f.family))||!mapInfo||mapInfo.overview)return;
   clearTimeout(fbDraw); fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);
 });
+Fallback.onface=()=>{if(!mapInfo||mapInfo.overview)return;clearTimeout(fbDraw);fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);};
 function fbView(){
   if(!Fallback.on||!mapInfo||mapInfo.overview)return;
   const {D,cell,headH}=mapInfo, r=$('#map').getBoundingClientRect(), box=$('#mapscroll').getBoundingClientRect();
