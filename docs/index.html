@@ -231,7 +231,12 @@ td.hex,td.num,.mono{font-family:var(--mono);font-size:.82rem}
 .barsay{color:var(--muted);font-size:.88rem;margin-left:6px}
 .barwrap{position:relative;margin-bottom:10px}
 .barwrap canvas{display:block;width:100%;cursor:crosshair}
-.mlegend .pat::before{background:var(--c)}
+.mlegend .pat::before{display:none}
+.patpic{display:inline-flex;gap:2px;margin-right:7px;vertical-align:-2px}
+.patpic i{display:block;height:12px;background:var(--c)}
+.barctl .pills{margin-bottom:0}
+.barctl>*{align-self:center}
+.barwrap .detail[hidden]{display:none}
 .covtip{position:absolute;pointer-events:none;z-index:5;background:var(--bg);border:1px solid var(--fg);padding:7px 10px;font-size:.8rem;white-space:nowrap}
 .covtip table{border-collapse:collapse;margin-top:3px}.covtip td,.covtip th{padding:1px 10px 1px 0;text-align:left;font-weight:400}.covtip th{color:var(--muted);font-size:.72rem}
 .covtip td:nth-child(n+4),.covtip th:nth-child(n+4){text-align:right;font-family:var(--mono);padding-right:0;padding-left:8px}
@@ -424,7 +429,7 @@ if(new URLSearchParams(location.search).get('design')==='tofu'){document.documen
       <div class="mlegend" id="covlegend"></div>
       <div id="covbody"><h2 style="margin-top:28px" id="covsplittitle">Most frequent characters, in order</h2>
       <div class="barctl"><div class="pills" id="barrange" role="radiogroup" aria-label="How many characters"><button role="radio" data-n="top" aria-checked="true">Top 1,000</button><button role="radio" data-n="all" aria-checked="false">All</button></div><button id="baronly" class="btn" aria-pressed="false" title="Leave out the characters that are whole tokens">Only split</button><span class="barsay" id="barsay"></span></div>
-      <div class="barwrap"><canvas id="barcode" aria-label="One cell per character, most frequent first: whole token or split into bytes"></canvas><div id="bartip" class="covtip" hidden></div></div>
+      <div class="barwrap"><canvas id="barcode" aria-label="One cell per character, most frequent first: whole token or split into bytes"></canvas><div id="bartip" class="detail" hidden></div></div>
       <div class="mlegend" id="barlegend"></div></div>
     </section>
   </div>
@@ -1192,6 +1197,16 @@ function showDetailSide(cp){ // the fields of the paper's figure
   $('#detail').innerHTML=(kind?`<div class="big kind">${kind}</div>`:bigGlyph(cp,ch))+`<dl><dt>code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)} (${b.length} byte${b.length>1?'s':''})</dd><dt>UTF-16</dt><dd>${utf16(cp)}</dd><dt>status</dt><dd class="plain">${status}</dd><dt>encoding</dt><dd class="split">${pieces}</dd>${prefixLine}</dl>${pinned!==null?'<div class="foot">Pinned. Click it again or press Esc to release.</div>':''}`;
   $('#detail').classList.toggle('pinned',pinned!==null);
 }
+// the card for one character, as the byte map shows it: the glyph, code point, bytes, and the tokens it becomes as
+// blocks (a byte fragment in the fragment colour). `lead` puts rows of its own first (the barcode adds rank and share).
+function charCard(cp,lead=''){
+  const ch=String.fromCodePoint(cp), b=encU.encode(ch), kind=KIND(ch);
+  const ids=V.splitChar(ch), whole=ids.length===1&&V.bytes[ids[0]].length===b.length;
+  const split=ids.map(id=>{const t=V.text[id];return `<span class="${t===null?'frag':''}">${t===null?hex(V.bytes[id]):esc(t)}</span>`}).join('');
+  const pre=b.subarray(0,b.length-1), pk=BPE.key(pre,0,pre.length);
+  const prefixLine=pre.length>=2&&vocabKeys().has(pk)&&!isTextToken(pk)?`<dt>Prefix</dt><dd>${hex(pre)} is a token</dd>`:'';
+  return (kind?`<div class="big kind">${kind}</div>`:bigGlyph(cp,ch))+`<dl>${lead}<dt>Code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)}</dd><dt>Tokens</dt><dd class="plain">${whole?'1, whole':'<span class="inv">split into '+ids.length+'</span>'}</dd><dt>Pieces</dt><dd class="split">${split}</dd>${prefixLine}</dl>`;
+}
 function showDetail(cp){
   const ch=String.fromCodePoint(cp), b=encU.encode(ch); lastCp=cp;
   if(isSide()){showDetailSide(cp);return;}
@@ -1200,12 +1215,7 @@ function showDetail(cp){
     $('#detail').innerHTML=(k?`<div class="big kind">${k}</div>`:bigGlyph(cp,ch))+`<dl><dt>Code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)}</dd><dt>Tokens</dt><dd class="plain">${w?'1, whole':'<span class="inv">split</span>'}</dd><dt>Pieces</dt><dd class="plain">…</dd></dl>`;
     $('#detail').classList.toggle('pinned',pinned!==null); return;
   }
-  const ids=V.splitChar(ch), whole=ids.length===1&&V.bytes[ids[0]].length===b.length;
-  const split=ids.map(id=>{const t=V.text[id];return `<span class="${t===null?'frag':''}">${t===null?hex(V.bytes[id]):esc(t)}</span>`}).join('');
-  const pre=b.subarray(0,b.length-1), pk=BPE.key(pre,0,pre.length);
-  const prefixLine=pre.length>=2&&vocabKeys().has(pk)&&!isTextToken(pk)?`<dt>Prefix</dt><dd>${hex(pre)} is a token</dd>`:'';
-  const kind=KIND(ch);
-  $('#detail').innerHTML=(kind?`<div class="big kind">${kind}</div>`:bigGlyph(cp,ch))+`<dl><dt>Code point</dt><dd>${U(cp)}</dd><dt>UTF-8</dt><dd>${hex(b)}</dd><dt>Tokens</dt><dd class="plain">${whole?'1, whole':'<span class="inv">split into '+ids.length+'</span>'}</dd><dt>Pieces</dt><dd class="split">${split}</dd>${prefixLine}</dl>${pinned!==null?'<div class="foot">Pinned. Click it again or press Esc to release.</div>':''}`;
+  $('#detail').innerHTML=charCard(cp)+(pinned!==null?'<div class="foot">Pinned. Click it again or press Esc to release.</div>':'');
   $('#detail').classList.toggle('pinned',pinned!==null);
 }
 $('#map').addEventListener('mousemove',ev=>{
@@ -1400,17 +1410,18 @@ function drawBarcode(){
   $('#barsay').textContent=`${N.toLocaleString()} characters: ${(count.get(0)||0).toLocaleString()} whole, ${split.toLocaleString()} split`;
   $('#barrange').querySelectorAll('button').forEach(b=>b.setAttribute('aria-checked',String((b.dataset.n==='all')===barAll)));
   $('#baronly').setAttribute('aria-pressed',String(barOnly));
-  $('#barlegend').innerHTML=`<span class="whole">whole token · ${(count.get(0)||0).toLocaleString()}</span>`+order.map(k=>`<span class="pat" style="--c:${col(k)}" title="Bytes per token, in order">split ${C.pats[k]} · ${count.get(k).toLocaleString()}</span>`).join('');
+  $('#barlegend').innerHTML=`<span class="whole" title="One token for the whole character">${(count.get(0)||0).toLocaleString()} whole</span>`+order.map(k=>{const p=C.pats[k].split('+').map(Number);return `<span class="pat" style="--c:${col(k)}" title="Split into ${p.length} tokens of ${p.join(', ')} byte${p[p.length-1]>1?'s':''}"><span class="patpic" aria-hidden="true">${p.map(n=>`<i style="width:${n*9}px"></i>`).join('')}</span>${count.get(k).toLocaleString()}</span>`;}).join('');
 }
 function barTip(ev){
   const tip=$('#bartip'); if(!ev||!barInfo){tip.hidden=true;return;}
   const {items,cols,cell,F,C,col}=barInfo, cv=$('#barcode'), r=cv.getBoundingClientRect();
   const c=Math.floor((ev.clientX-r.left)/(cell+1)), row=Math.floor((ev.clientY-r.top)/(cell+1)), i=items[row*cols+c];
   if(c<0||c>=cols||i===undefined){tip.hidden=true;return;}
-  const [cp,n]=F.chars[i], ch=String.fromCodePoint(cp), ids=V.splitChar(ch), k=barPattern(C,F,i);
-  tip.innerHTML=`<b>Rank ${(i+1).toLocaleString()}</b> · ${(100*n/F.total).toFixed(3)}% of text<table><tbody><tr><td class="txt" style="font-size:1.5rem;padding-right:14px">${Fallback.html(cp,(MARK.test(ch)?'◌':'')+ch)}</td><td>${k===0?'one whole token':'split '+C.pats[k]+', '+ids.length+' tokens'}<br><span style="font-family:var(--mono)">${ids.map(id=>V.text[id]===null?hex(V.bytes[id]):esc(V.text[id])).join('  |  ')}</span></td></tr></tbody></table>`;
-  tip.hidden=false; const wr=cv.parentNode.getBoundingClientRect(), x=ev.clientX-wr.left, tw=tip.offsetWidth;
-  tip.style.left=(x+14+tw>wr.width?Math.max(0,x-14-tw):x+14)+'px'; tip.style.top=(ev.clientY-wr.top+16)+'px';
+  const [cp,n]=F.chars[i];
+  tip.innerHTML=charCard(cp,`<dt>Rank</dt><dd>${(i+1).toLocaleString()}</dd><dt>Share of text</dt><dd>${(100*n/F.total).toFixed(3)}%</dd>`);
+  tip.hidden=false; const w=tip.offsetWidth, h=tip.offsetHeight;
+  tip.style.left=Math.max(8,Math.min(innerWidth-w-8,ev.clientX+16))+'px';
+  tip.style.top=(ev.clientY+18+h>innerHeight-8?Math.max(8,ev.clientY-h-14):ev.clientY+18)+'px';
 }
 $('#barcode').addEventListener('mousemove',barTip); $('#barcode').addEventListener('mouseleave',()=>barTip(null));
 $('#barrange').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;barAll=b.dataset.n==='all';drawBarcode();});
