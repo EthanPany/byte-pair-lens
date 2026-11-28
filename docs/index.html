@@ -757,13 +757,21 @@ const Fallback=(function(){
     const f=new FontFace(FAM,`url(fonts/fb/${s.f}?v=${s.v}${t?'&try='+t:''}) format("woff2")`,{unicodeRange:r.join(','),display:'swap'});
     document.fonts.add(f); return faces[k]=f;
   }
-  function init(j){
-    idx=j.slices; table=new Uint16Array(0x110000);
-    idx.forEach((s,k)=>{for(let i=0;i<s.r.length;i+=2)for(let cp=s.r[i],e=cp+s.r[i+1];cp<e;cp++)if(!table[cp])table[cp]=k+1;});
+  // the probe needs no data, so it is ready before the index: until the index is here a character this machine
+  // cannot draw is left empty (`waiting`), and if the index never comes it is drawn as its code point (`missing`)
+  let failed=false;
+  function probe(){
+    if(tofu)return;
     base=cssVar('--sans-base');
     // unassigned code points: every one must draw as the same box, or (Firefox draws the digits) boxes cannot be told apart
     const boxes=[0x378,0x530,0x2FE0,0x1FFF,0x3FFFD].map(cp=>sig(String.fromCodePoint(cp))).filter(Boolean);
-    tofu=new Set(boxes); if(tofu.size!==1){mode='all';idx.forEach((s,k)=>register(k));}
+    tofu=new Set(boxes); if(tofu.size!==1)mode='all';
+  }
+  function init(j){
+    probe();
+    idx=j.slices; table=new Uint16Array(0x110000);
+    idx.forEach((s,k)=>{for(let i=0;i<s.r.length;i+=2)for(let cp=s.r[i],e=cp+s.r[i+1];cp<e;cp++)if(!table[cp])table[cp]=k+1;});
+    if(mode==='all')idx.forEach((s,k)=>register(k));
   }
   // make the characters drawable; resolves to true when a font arrived that was not there before
   function need(cps){
@@ -789,7 +797,7 @@ const Fallback=(function(){
   const cpsOf=str=>{const a=[];for(const ch of str){const cp=ch.codePointAt(0);if(cp>=0x250)a.push(cp);if(a.length>4000)break;}return a;};
   // no system font and no slice (or the slice failed): the caller draws the code point instead
   function missing(cp){
-    if(!idx)return false;
+    if(!idx){if(!failed||cp<0x250)return false;probe();return mode==='probe'&&hasGlyph(cp)===false;}
     const k=table[cp]; if(k&&!(faces[k-1]&&faces[k-1].status==='error'))return false;
     if(mode==='probe')return hasGlyph(cp)===false;
     // boxes cannot be told apart here (Firefox, Unifont): a character no slice covers is taken as having no font.
@@ -798,7 +806,8 @@ const Fallback=(function(){
   }
   // a slice for this character is on its way: the map leaves the cell empty until it arrives, so no box flashes
   function waiting(cp){
-    if(!idx||mode!=='probe')return false;
+    if(!idx){if(failed||cp<0x250)return false;probe();return mode==='probe'&&hasGlyph(cp)===false;}
+    if(mode!=='probe')return false;
     const k=table[cp]; if(!k)return false; const f=faces[k-1]; return (!f||f.status==='unloaded'||f.status==='loading')&&hasGlyph(cp)===false;
   }
   const nog=cp=>{const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2);return `<span class="nog" title="No open font draws this character yet, so its code point is shown">${h.slice(0,m)}<br>${h.slice(m)}</span>`;};
@@ -809,7 +818,7 @@ const Fallback=(function(){
       if(!pend)pend=setTimeout(()=>{pend=null;const els=[...seen];seen.clear();for(const el of els)if(el&&el.isConnected)need(cpsOf(el.textContent||''));},120);
     }).observe(root,{childList:true,subtree:true,characterData:true});
   }
-  return {init,need,missing,waiting,nog,watch,cpsOf,set onface(f){hook=f;},set onprogress(f){prog=f;},get on(){return !!idx;}};
+  return {init,fail(){failed=true;},need,missing,waiting,nog,watch,cpsOf,set onface(f){hook=f;},set onprogress(f){prog=f;},get on(){return !!idx;}};
 })();
 // characters with nothing to draw: say what they are instead of showing a missing-glyph box
 const KIND=ch=>/^\p{Cc}$/u.test(ch)?'control character':/^\p{Cf}$/u.test(ch)?'format character':/^[\p{Zs}\p{Zl}\p{Zp}]$/u.test(ch)?'space':null;
@@ -1012,7 +1021,8 @@ if(document.fonts&&document.fonts.addEventListener)document.fonts.addEventListen
   if(!(e.fontfaces||[]).some(f=>/BPL Fallback/.test(f.family))||!mapInfo||mapInfo.overview)return;
   clearTimeout(fbDraw); fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);
 });
-Fallback.onprogress=(d,t)=>{const on=t>0&&d<t;$('#fbbar').classList.toggle('on',on);$('#fbbar').firstChild.style.width=(t?100*d/t:0)+'%';$('#fbnote').hidden=!on;if(on)$('#fbnote').textContent=`Loading fonts, ${d} of ${t}`;};
+function fbProgress(d,t){const on=t>0&&d<t;$('#fbbar').classList.toggle('on',on);$('#fbbar').firstChild.style.width=(t?100*d/t:0)+'%';$('#fbnote').hidden=!on;if(on)$('#fbnote').textContent=`Loading fonts, ${d} of ${t}`;}
+Fallback.onprogress=fbProgress;
 Fallback.onface=()=>{if(!mapInfo||mapInfo.overview)return;clearTimeout(fbDraw);fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);};
 function fbView(){
   if(!Fallback.on||!mapInfo||mapInfo.overview)return;
@@ -1401,7 +1411,8 @@ const H=readHash(); const startEnc=[...$('#encsel').options].some(o=>o.value===H
     await fonts;
     if(!(bitsFor(startEnc)&&currentTab()==='map'))await p.catch(()=>{}); // no bitmap, or a tab that needs the vocabulary: wait for it
     drawMap(); Loader.release();
-    getData('fallback.json').then(j=>{Fallback.init(j);Fallback.watch(document.body);Fallback.need(Fallback.cpsOf(document.body.textContent));if(currentTab()==='map')drawMap();}).catch(e=>console.warn('fallback fonts',e));
+    fbProgress(0,1);
+    getData('fallback.json').then(j=>{fbProgress(1,1);Fallback.init(j);Fallback.watch(document.body);Fallback.need(Fallback.cpsOf(document.body.textContent));if(currentTab()==='map')drawMap();}).catch(e=>{console.warn('fallback fonts',e);fbProgress(1,1);Fallback.fail();if(currentTab()==='map')drawMap();});
   });
 })();
 })();
