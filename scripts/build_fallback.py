@@ -5,13 +5,17 @@ The page uses system fonts for everything outside Latin. Where a reader's system
 fonts into small slices, one or more per Unicode block, so the page can register and download
 only the slices a given machine is missing (see `Fallback` in docs/index.html).
 
-Usage:  python3 build_fallback.py <noto_ttf_dir> <plangothic_dir> <node_modules>
+Usage:  python3 build_fallback.py <noto_ttf_dir> <plangothic_dir> <node_modules> <extra_dir>
           noto_ttf_dir     *-Regular.ttf from github.com/notofonts/notofonts.github.io (fonts/*/unhinted/ttf),
                            plus NotoEmoji-Regular.ttf: github.com/google/fonts ofl/notoemoji, instanced at wght 400
                            (outline emoji: colour emoji fonts do not draw in every browser)
           plangothic_dir   PlangothicP1-Regular.ttf, PlangothicP2-Regular.ttf (branch `build` of
                            github.com/Fitzgerald-Porthmouth-Koenigsegg/Plangothic_Project)
-          node_modules     with @fontsource/noto-sans-sc installed
+          node_modules     with @fontsource/noto-sans-sc installed (web slices of the common Han characters)
+          extra_dir        fonts that only fill what the ones above leave open, in this order:
+                           NotoSansCJKsc-Regular.otf (github.com/notofonts/noto-cjk, Sans/OTF/SimplifiedChinese): the
+                           rest of CJK Unified Ideographs and Extension A, CJK symbols, box drawing;
+                           NewGardiner.ttf (github.com/nederhof/newgardiner, fonts/): Egyptian Hieroglyphs Extended-A
         python3 build_fallback.py --check    (index and files agree; exit 1 otherwise)
 
 Needs: pip install fonttools brotli
@@ -24,9 +28,10 @@ OUT = ROOT / 'fonts' / 'fb'
 INDEX = ROOT / 'fallback.json'
 SLICE = 1024           # code points per slice in large blocks
 SKIP = {'Basic Latin', 'Latin-1 Supplement', 'Private Use Area', 'High Surrogates', 'High Private Use Surrogates',
-        'Low Surrogates', 'Supplementary Private Use Area-A', 'Supplementary Private Use Area-B', 'Specials', 'Tags',
+        'Low Surrogates', 'Supplementary Private Use Area-A', 'Supplementary Private Use Area-B', 'Tags',
         'Variation Selectors', 'Variation Selectors Supplement'}
-HAN_BMP = {'CJK Unified Ideographs', 'CJK Unified Ideographs Extension A'}  # served by the Noto Sans SC slices
+RENAME = {'NewGardiner': 'TOFU Fallback Hieroglyphs'}  # Reserved Font Name: a cut-down copy must not carry it
+EXTRA = ['NotoSansCJKsc-Regular.otf', 'NewGardiner.ttf']  # in extra_dir; used only for code points nothing else has
 
 
 def blocks():
@@ -66,7 +71,7 @@ def css_ranges(css):
     return out
 
 
-def build(noto_dir, plan_dir, node_modules):
+def build(noto_dir, plan_dir, node_modules, extra_dir):
     from fontTools.ttLib import TTFont
     from fontTools import subset
 
@@ -80,6 +85,18 @@ def build(noto_dir, plan_dir, node_modules):
         t.close()
     # Sans before Serif, script fonts before the catch-alls, so the look stays consistent
     order = sorted(fonts, key=lambda n: (n in ('NotoSans', 'NotoSerif'), n.startswith('Plangothic'), 'Serif' in n, n))
+    extra = []
+    for fn in EXTRA:
+        p = Path(extra_dir) / fn
+        t = TTFont(p, lazy=True)
+        fonts[p.stem.replace('-Regular', '')] = (p, set(t.getBestCmap()))
+        extra.append(p.stem.replace('-Regular', ''))
+        t.close()
+    # the ready-made Noto Sans SC slices come first for the characters they hold (copied at the end)
+    nm = Path(node_modules) / '@fontsource' / 'noto-sans-sc'
+    sc = {fname: sorted(cp for cp in cps if 0x2E80 <= cp <= 0x9FFF or 0xF900 <= cp <= 0xFFEF)
+          for fname, cps in sorted(css_ranges((nm / '400.css').read_text()).items())}
+    sc_has = set().union(*map(set, sc.values()))
     slices, missing, n_out = [], [], 0
 
     def emit(name, src, cps, group):
@@ -99,6 +116,10 @@ def build(noto_dir, plan_dir, node_modules):
         s = subset.Subsetter(opt)
         s.populate(unicodes=cps)
         s.subset(f)
+        if src in RENAME:
+            for rec in f['name'].names:
+                if rec.nameID in (1, 3, 4, 6, 16):
+                    rec.string = RENAME[src] if rec.nameID != 6 else RENAME[src].replace(' ', '')
         out = OUT / f'{name}.woff2'
         subset.save_font(f, str(out), opt)
         f.close()
@@ -106,27 +127,26 @@ def build(noto_dir, plan_dir, node_modules):
         n_out += 1
 
     for lo, hi, bname in blocks():
-        if bname in SKIP or bname in HAN_BMP:
+        if bname in SKIP:
             continue
         slug = re.sub(r'[^a-z0-9]+', '-', bname.lower()).strip('-')
-        left = set(range(lo, hi + 1))
+        left = set(range(lo, hi + 1)) - sc_has
         k = 0
-        while True:
-            best = max(order, key=lambda n: len(fonts[n][1] & left))   # max keeps the first of equals: `order`
-            got = sorted(fonts[best][1] & left)
-            if not got:
-                break
-            for i in range(0, len(got), SLICE):
-                emit(f'{slug}-{k}', best, got[i:i + SLICE], bname)
-                k += 1
-            left -= set(got)
-        if k == 0:
+        for pool in (order, extra):   # the extra fonts only see what the first pool left open
+            while True:
+                best = max(pool, key=lambda n: len(fonts[n][1] & left))   # max keeps the first of equals
+                got = sorted(fonts[best][1] & left)
+                if not got:
+                    break
+                for i in range(0, len(got), SLICE):
+                    emit(f'{slug}-{k}', best, got[i:i + SLICE], bname)
+                    k += 1
+                left -= set(got)
+        if k == 0 and not (set(range(lo, hi + 1)) & sc_has):
             missing.append(bname)
 
     # ready-made slices for CJK Unified Ideographs and Extension A
-    nm = Path(node_modules) / '@fontsource' / 'noto-sans-sc'
-    for fname, cps in sorted(css_ranges((nm / '400.css').read_text()).items()):
-        cps = sorted(cp for cp in cps if 0x2E80 <= cp <= 0x9FFF or 0xF900 <= cp <= 0xFFEF)
+    for fname, cps in sc.items():
         if not cps:
             continue
         out = OUT / fname.replace('-400-normal', '')
@@ -151,6 +171,6 @@ def check():
 if __name__ == '__main__':
     if '--check' in sys.argv:
         check()
-    if len(sys.argv) != 4:
+    if len(sys.argv) != 5:
         sys.exit(__doc__)
     build(*sys.argv[1:])
