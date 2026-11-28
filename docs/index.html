@@ -41,6 +41,10 @@ body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);font-
 [role=tabpanel]{display:grid;grid-template-columns:minmax(0,1fr);gap:44px;padding-top:6px}
 h1{font-family:"Bree Serif",Georgia,serif;font-weight:400;font-size:2.1rem;line-height:1.15;margin:0 0 2px}
 h1{display:inline-block;cursor:help}
+header{position:relative}
+.tofutip{position:absolute;top:100%;left:0;z-index:30;margin-top:8px;max-width:min(440px,90vw);padding:11px 14px;background:var(--fg);color:var(--bg);font-size:.9rem;line-height:1.45;opacity:0;visibility:hidden;transform:translateY(-3px);transition:opacity .12s,transform .12s,visibility .12s}
+.tofutip::before{content:"";position:absolute;left:18px;top:-5px;width:10px;height:10px;background:var(--fg);transform:rotate(45deg)}
+h1:hover~.tofutip,h1:focus-visible~.tofutip{opacity:1;visibility:visible;transform:none}
 .tagline{margin:0;color:var(--muted);font-size:.95rem;vertical-align:baseline}
 h1 .tofu>span{color:transparent;font-size:.3em;line-height:1;vertical-align:top} /* the real character U+25AF, so the heading copies as T▯FU; the box itself is drawn */
 h1 .tofu{overflow:hidden;white-space:nowrap;display:inline-block;width:.62em;height:.74em;border:.085em solid currentColor;box-sizing:border-box;margin:0 .07em 0 .05em;vertical-align:baseline} /* the missing-glyph box that gives the tool its name */
@@ -160,7 +164,12 @@ td.hex,td.num,.mono{font-family:var(--mono);font-size:.82rem}
 .viewseg{margin:0 0 0 auto;gap:0}
 .zoomseg:not([hidden])+.viewseg{margin-left:0}
 .zoomseg button{min-width:var(--h);justify-content:center;font-size:1.05rem}
-.fbbar{height:3px;margin-bottom:2px;background:transparent;overflow:hidden}.fbbar i{display:block;height:100%;width:0;background:var(--fg);transition:width .25s}.fbbar:not(.on) i{opacity:0}
+.mlegend .fbnote{display:inline-flex;align-items:center;gap:8px;padding:3px 11px 3px 9px;background:var(--fg);color:var(--bg);font-weight:600;font-size:.82rem}
+.mlegend .fbnote[hidden]{display:none}
+.mlegend .fbnote::before{width:8px;height:8px;margin:0;border-radius:50%;background:var(--bg);animation:fbpulse 1s ease-in-out infinite}
+@keyframes fbpulse{50%{opacity:.25;transform:scale(.7)}}
+@media (prefers-reduced-motion:reduce){.mlegend .fbnote::before{animation:none}}
+.fbbar{height:4px;margin-bottom:2px;background:transparent;overflow:hidden}.fbbar.on{background:var(--line)}.fbbar i{display:block;height:100%;width:0;background:var(--whole);transition:width .25s}.fbbar:not(.on) i{opacity:0}
 .viewseg button+button{margin-left:-1px}
 .viewseg:not([hidden])+input{margin-left:0}
 /* Detailed view: the block map as in the paper's figure, with the detail in a panel beside it */
@@ -264,8 +273,9 @@ footer a:hover{color:var(--fg)}
 
 <div class="wrap">
   <header>
-    <h1 aria-label="TOFU" title="Tofu: the empty box a font shows when it has no glyph for a character. A tokenizer’s tofu is a character with no token of its own, spelled out in bytes instead.">T<span class="tofu"><span>▯</span></span>FU</h1>
+    <h1 aria-label="TOFU" aria-describedby="tofutip" tabindex="0">T<span class="tofu"><span>▯</span></span>FU</h1>
     <p class="tagline">Tokens or Fragments of UTF-8</p>
+    <div class="tofutip" id="tofutip" role="tooltip"><b>Tofu</b>: the empty box a font shows when it has no glyph for a character. A tokenizer’s tofu is a character with no token of its own, spelled out in bytes instead.</div>
   </header>
   <div class="rail" id="encrail" role="radiogroup" aria-label="Tokenizer"></div>
   <p class="note" id="loadstatus" aria-live="polite"></p>
@@ -310,7 +320,7 @@ footer a:hover{color:var(--fg)}
         <div class="scriptchips" id="scriptchips" role="group" aria-label="Scripts"></div>
       </div>
       <div class="mlegend maplegend"><span class="whole" id="lgwhole">one whole token</span><span class="none" id="lgsplit">split into bytes</span><span class="fragrow" id="lgfrag" hidden>row prefix is a fragment token</span><span class="empty" id="lgempty" title="Unassigned, or outside this block">no character</span><span class="tip" id="maptip"></span>
-        <span class="tip" id="fbnote" role="status" hidden></span>
+        <span class="fbnote" id="fbnote" role="status" hidden></span>
         <div class="pills viewseg zoomseg" id="zoomseg" role="group" aria-label="Cell size" hidden><button id="zout" title="Smaller cells" aria-label="Smaller cells">−</button><button id="zin" title="Larger cells" aria-label="Larger cells">+</button></div>
         <div class="pills viewseg" id="viewseg" role="radiogroup" aria-label="View" hidden><button role="radio" data-v="compact" aria-checked="true" title="The 64 columns fitted to the page">Compact</button><button role="radio" data-v="detailed" aria-checked="false" title="Larger characters, a side panel, and a red mark on rows whose byte prefix is itself a token">Detailed</button></div>
         <input type="search" id="blocksearch" list="blocklist" placeholder="Find any Unicode block…" aria-label="Jump to a Unicode block">
@@ -1007,7 +1017,7 @@ if(document.fonts&&document.fonts.addEventListener)document.fonts.addEventListen
   if(!(e.fontfaces||[]).some(f=>/BPL Fallback/.test(f.family))||!mapInfo||mapInfo.overview)return;
   clearTimeout(fbDraw); fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);
 });
-function fbProgress(d,t){const on=t>0&&d<t;$('#fbbar').classList.toggle('on',on);$('#fbbar').firstChild.style.width=(t?100*d/t:0)+'%';$('#fbnote').hidden=!on;if(on)$('#fbnote').textContent=`Loading fonts, ${d} of ${t}`;}
+function fbProgress(d,t){const on=t>0&&d<t;$('#fbbar').classList.toggle('on',on);$('#fbbar').firstChild.style.width=(t?100*d/t:0)+'%';$('#fbnote').hidden=!on;if(on)$('#fbnote').textContent=`Loading fonts ${d}/${t}`;}
 Fallback.onprogress=fbProgress;
 Fallback.onface=()=>{if(!mapInfo||mapInfo.overview)return;clearTimeout(fbDraw);fbDraw=setTimeout(()=>{if(mapInfo&&!mapInfo.overview&&currentTab()==='map')drawMap();},200);};
 function fbView(){
