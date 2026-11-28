@@ -764,6 +764,11 @@ const Fallback=(function(){
     // Latin, private use, variation selectors and tags have no slices on purpose.
     return cp>=0x250&&!(cp>=0xD800&&cp<=0xF8FF)&&!(cp>=0xFE00&&cp<=0xFE0F)&&!(cp>=0xE0000);
   }
+  // a slice for this character is on its way: the map leaves the cell empty until it arrives, so no box flashes
+  function waiting(cp){
+    if(!idx||mode!=='probe')return false;
+    const k=table[cp]; if(!k)return false; const f=faces[k-1]; return (!f||f.status==='unloaded'||f.status==='loading')&&hasGlyph(cp)===false;
+  }
   const nog=cp=>{const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2);return `<span class="nog" title="No open font draws this character yet, so its code point is shown">${h.slice(0,m)}<br>${h.slice(m)}</span>`;};
   // text placed in the page by any tab: look at what was added and fetch what it needs
   let pend=null; const seen=new Set();
@@ -772,7 +777,7 @@ const Fallback=(function(){
       if(!pend)pend=setTimeout(()=>{pend=null;const els=[...seen];seen.clear();for(const el of els)if(el&&el.isConnected)need(cpsOf(el.textContent||''));},120);
     }).observe(root,{childList:true,subtree:true,characterData:true});
   }
-  return {init,need,missing,nog,watch,cpsOf,get on(){return !!idx;}};
+  return {init,need,missing,waiting,nog,watch,cpsOf,get on(){return !!idx;}};
 })();
 // characters with nothing to draw: say what they are instead of showing a missing-glyph box
 const KIND=ch=>/^\p{Cc}$/u.test(ch)?'control character':/^\p{Cf}$/u.test(ch)?'format character':/^[\p{Zs}\p{Zl}\p{Zp}]$/u.test(ch)?'space':null;
@@ -948,6 +953,7 @@ function drawMap(){
         if(cell>=15){const h=cp.toString(16).toUpperCase().padStart(4,'0'),m=Math.ceil(h.length/2),fs=Math.max(5,cell*.34);ctx.font=`${fs}px ${mono}`;ctx.fillText(h.slice(0,m),cx,y+cell/2-fs*.5+.5,cell-2);ctx.fillText(h.slice(m),cx,y+cell/2+fs*.5+.5,cell-2);ctx.font=`${cell-6}px ${sans}`;}
         else{const q=Math.max(2,Math.round(cell/7));ctx.fillRect(cx-q/2,y+cell/2-q/2,q,q);}
         ctx.globalAlpha=1;continue;}
+      if(Fallback.waiting(cp))continue;
       ctx.fillText(MARK.test(ch)?'◌'+ch:ch,LABELW+c*(cell+GAP)+cell/2,y+cell/2+1,cell);
     }
   }
